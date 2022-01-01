@@ -1,5 +1,6 @@
 --[[
-I haven't had the best of luck with the CPU drivers of Intel OpenCL.
+I haven't had the best of luck with the CPU OpenCL implementation of Intel OpenCL.
+I guess AMD's CPU OpenCL is dead.
 So for now I'll make a Lua version.
 Maybe later I'll make a C++ version.
 --]]
@@ -288,7 +289,8 @@ enum {
   CL_PROFILING_COMMAND_QUEUED                  = 0x1280,
   CL_PROFILING_COMMAND_SUBMIT                  = 0x1281,
   CL_PROFILING_COMMAND_START                   = 0x1282,
-  CL_PROFILING_COMMAND_END                     = 0x1283
+  CL_PROFILING_COMMAND_END                     = 0x1283,
+  CL_PROFILING_COMMAND_COMPLETE                = 0x1284,
 };
 
 typedef signed char               int8_t;
@@ -414,6 +416,7 @@ typedef cl_uint                   cl_kernel_work_group_info;
 typedef cl_uint                   cl_event_info;
 typedef cl_uint                   cl_command_type;
 typedef cl_uint                   cl_profiling_info;
+typedef cl_uint                   cl_buffer_region;
 
 typedef struct _cl_image_format {
   cl_channel_order image_channel_order;
@@ -523,7 +526,7 @@ struct _cl_platform_id { int id; };
 struct _cl_device_id { int id; };
 struct _cl_context { int id; };
 struct _cl_command_queue { int id; };
-
+struct _cl_event { int id; };
 
 struct _cl_mem {
 	size_t size;
@@ -542,25 +545,86 @@ struct _cl_kernel {
 
 local cl = {}
 
-local function getString(name, ptr, sizePtr)
+local function getString(name, resultPtr, sizePtr)
 	if sizePtr then
 		sizePtr[0] = #name + 1
 	else
-		assert(ptr)
-		ffi.copy(ptr, name)
+		assert(resultPtr)
+		ffi.copy(resultPtr, name)
 	end
 end
+
+
+
+local function makeGetter(args)
+	return function(id, name, paramSize, resultPtr, sizePtr)
+		print(args.name, id, name)--, paramSize, resultPtr, sizePtr)
+		
+		local var = args[name]
+		if not var then return ffi.C.CL_INVALID_VALUE end
+	
+-- assert that our pointers are already the right type ... ?
+--		sizePtr = ffi.cast(var.type..'*', sizePtr)
+--		resultPtr = ffi.cast(var.type..'*', resultPtr)
+		if resultPtr ~= nil then
+			if var.getString then
+				-- this will do the writing to resultPtr and/or sizePtr
+				return var.getString(resultPtr, sizePtr) or ffi.C.CL_SUCCESS
+			else	
+				-- copy by ref
+				local value, err = var.get()
+				if err then
+					return err
+				end
+				resultPtr[0] = value
+				
+				if sizePtr ~= nil then
+					sizePtr[0] = ffi.sizeof(var.type)
+				end
+			end
+		end
+		
+		return ffi.C.CL_SUCCESS
+	end
+end
+
+
 
 -- PLATFORM
 
-function cl.clGetPlatformInfo(platform, name, value, ptr, sizePtr)
-	if name == ffi.C.CL_PLATFORM_NAME then
-		getString('CPU debug implementation', ptr, sizePtr)
-	else
-		print('clGetPlatformInfo', platform, name, count, platformIDs, countPtr)
-	end
-	return cl.CL_SUCCESS
-end
+cl.clGetPlatformInfo = makeGetter{
+	name = 'clGetPlatformInfo',
+	[ffi.C.CL_PLATFORM_PROFILE] = {
+		type = 'char[]',
+		getString = function(resultPtr, sizePtr)
+			return getString('FULL_PROFILE', resultPtr, sizePtr)
+		end,
+	},
+	[ffi.C.CL_PLATFORM_VERSION] = {
+		type = 'char[]',
+		getString = function(resultPtr, sizePtr)
+			return getString('OpenCL 1.1', resultPtr, sizePtr)
+		end,
+	},
+	[ffi.C.CL_PLATFORM_NAME] = {
+		type = 'char[]',
+		getString = function(resultPtr, sizePtr)
+			return getString('CPU debug implementation', resultPtr, sizePtr)
+		end,
+	},
+	[ffi.C.CL_PLATFORM_VENDOR] = {
+		type = 'char[]',
+		getString = function(resultPtr, sizePtr)
+			return getString('Christopher Moore', resultPtr, sizePtr)
+		end,
+	},
+	[ffi.C.CL_PLATFORM_EXTENSIONS] = {
+		type = 'char[]',	-- separator=' '
+		getString = function(resultPtr, sizePtr)
+			return getString('', resultPtr, sizePtr)
+		end,
+	},
+}
 
 function cl.clGetPlatformIDs(count, platformIDs, countPtr)
 	if count == 0 then
@@ -569,7 +633,7 @@ function cl.clGetPlatformIDs(count, platformIDs, countPtr)
 		platformIDs[0] = ffi.new'struct _cl_platform_id'
 		platformIDs[0].id = 0
 	end
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 -- DEVICE
@@ -578,16 +642,18 @@ function cl.clRetainDevice(device) end
 function cl.clReleaseDevice(device) end
 
 function cl.clGetDeviceInfo(device, name, paramSize, resultPtr, sizePtr)
-	if name == ffi.C.CL_DEVICE_EXTENSIONS then
-		getString('', resultPtr, sizePtr)
-	elseif name == ffi.C.CL_DEVICE_NAME then
-		getString('CPU debug implementation', resultPtr, sizePtr)
-	elseif name == ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE then
-		resultPtr[0] = 16
-	else
-		print('clGetDeviceInfo', device, name, paramSize, resultPtr, sizePtr)
+	if resultPtr ~= nil then
+		if name == ffi.C.CL_DEVICE_EXTENSIONS then
+			getString('', resultPtr, sizePtr)
+		elseif name == ffi.C.CL_DEVICE_NAME then
+			getString('CPU debug implementation', resultPtr, sizePtr)
+		elseif name == ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE then
+			resultPtr[0] = 16
+		else
+			print('clGetDeviceInfo', device, name, paramSize, resultPtr, sizePtr)
+		end
 	end
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 function cl.clGetDeviceIDs(platformID, deviceType, count, deviceIDs, countPtr)
@@ -597,7 +663,7 @@ function cl.clGetDeviceIDs(platformID, deviceType, count, deviceIDs, countPtr)
 		deviceIDs[0] = ffi.new'struct _cl_device_id[1]'
 		deviceIDs[0].id = 0
 	end
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 -- CONTEXT
@@ -607,11 +673,11 @@ function cl.clReleaseContext(ctx) end
 
 function cl.clGetContextInfo(ctx, name, count, ctxIDs, countPtr)
 	print('clGetContextInfo', ctx, name, count, ctxIDs, countPtr)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 function cl.clCreateContext(properties, numDevices, deviceIDs, notify, x, errPtr) 
-	if errPtr then errPtr[0] = cl.CL_SUCCESS end
+	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
 	local ctx = ffi.new'struct _cl_context[1]'
 	ctx[0].id = 0
 	return ctx
@@ -624,20 +690,20 @@ function cl.clReleaseMemObject(mem) end
 
 function cl.clGetMemObjectInfo(mem, name, size, valuePtr, sizePtr)
 	print('clGetMemObjectInfo', mem, name, size, valuePtr, sizePtr)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 -- IMAGE
 
 function cl.clGetImageInfo(mem, name, size, valuePtr, sizePtr)
 	print('clGetImageInfo', mem, name, size, valuePtr, sizePtr)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 -- BUFFER
 
 function cl.clCreateBuffer(ctxID, flags, size, hostptr, errPtr)
-	if errPtr then errPtr[0] = cl.CL_SUCCESS end
+	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
 	local mem = ffi.new'struct _cl_mem[1]'
 	mem[0].ptr = ffi.new('uint8_t[?]', size)
 	mem[0].size = size
@@ -645,21 +711,31 @@ function cl.clCreateBuffer(ctxID, flags, size, hostptr, errPtr)
 	return mem
 end
 
-function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, a, b, c)
-	assert(a == 0 and not b and not c)
-	ffi.copy(buffer[0].ptr + offset, ptr, size)
-	return cl.CL_SUCCESS
+local function handleEvents(numWaitListEvents, waitListEvents, event)
+	-- ignore the wait list, since luajit doesn't have multithreading and so all cl kernels are executed immediately
+	-- if an event is specified then ...
+	if event ~= nil then
+		-- event should be type cl_event*
+		event = ffi.cast('struct _cl_event *', event)
+		event[0].id = 0
+	end
 end
 
-function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, a, b, c)
-	assert(a == 0 and not b and not c)
+function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+	handleEvents(numWaitListEvents, waitListEvents, event)
+	ffi.copy(buffer[0].ptr + offset, ptr, size)
+	return ffi.C.CL_SUCCESS
+end
+
+function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+	handleEvents(numWaitListEvents, waitListEvents, event)
 	ffi.copy(ptr, buffer[0].ptr + offset, size)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 local int0 = ffi.new('int[1]', 0)
-function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size, a, b, c)
-	assert(a == 0 and not b and not c)
+function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
+	handleEvents(numWaitListEvents, waitListEvents, event)
 	pattern = pattern or int0
 	pattern = ffi.cast('uint8_t*', pattern)
 	if not patternSize then patternSize = ffi.sizeof(int0) end
@@ -667,7 +743,7 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 		buffer[0].ptr[offset+i] = pattern[i%patternSize]
 	end
 	--ffi.fill(buffer[0].ptr + offset, pattern, size)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 -- PROGRAM
@@ -686,13 +762,13 @@ function cl.clReleaseProgram(cmds) end
 function cl.clGetProgramInfo(programHandle, name, paramSize, resultPtr, sizePtr)
 	local id = programHandle[0].id
 	local program = assert(programsForID[id])
-	if name == cl.CL_PROGRAM_BINARY_SIZES then
+	if name == ffi.C.CL_PROGRAM_BINARY_SIZES then
 		if resultPtr == nil then
 			ffi.cast('size_t*', sizePtr)[0] = ffi.sizeof'size_t'
 		else
 			ffi.cast('size_t*', resultPtr)[0] = #program.libdata
 		end
-	elseif name == cl.CL_PROGRAM_BINARIES then
+	elseif name == ffi.C.CL_PROGRAM_BINARIES then
 		if resultPtr == nil then
 			ffi.cast('size_t*', sizePtr)[0] = ffi.sizeof'unsigned char*'
 		else
@@ -702,18 +778,18 @@ function cl.clGetProgramInfo(programHandle, name, paramSize, resultPtr, sizePtr)
 	else
 		print('clGetProgramInfo', programHandle, name, paramSize, resultPtr, sizePtr)
 	end
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, resultPtr, sizePtr)
 	local id = programHandle[0].id
 	local program = assert(programsForID[id])
-	if name == cl.CL_PROGRAM_BUILD_LOG then
+	if name == ffi.C.CL_PROGRAM_BUILD_LOG then
 		getString(program.compileLog..'\n'..program.linkLog, resultPtr, sizePtr)
 	else
 		print('clGetProgramBuildInfo', programHandle, name, paramSize, resultPtr, sizePtr)
 	end
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, errPtr)
@@ -734,16 +810,21 @@ local ffi = require 'ffi'
 if ffi.os == 'Windows' then
 ?>
 #define __attribute__(x)
-<?
-end
-?>
-
-#define constant const
 
 //I hate Windows
 #define EXTERN __declspec(dllexport)
 #define kernel EXTERN
 
+<? else ?>
+
+#define EXTERN
+#define kernel
+
+<?
+end
+?>
+
+#define constant const
 #define global
 #define local
 
@@ -866,7 +947,7 @@ end
 
 	programsForID[id].code = code
 
-	if errPtr then errPtr[0] = cl.CL_SUCCESS end
+	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
 	return programHandle
 end
 
@@ -875,7 +956,7 @@ function cl.clCreateProgramWithBinary(ctx, numDevices, devices, lengths, binarie
 end
 
 function cl.clBuildProgram(programHandle, numDevices, deviceIDs, options, a, b)
-	local err = cl.CL_SUCCESS
+	local err = ffi.C.CL_SUCCESS
 	local id = programHandle[0].id
 	assert(not a and not b)
 print('compiling program entry', id)
@@ -917,7 +998,7 @@ size_t _program_<?=id?>_group_id_2;
 	end, function(err)
 print('error while compiling: '..err)
 print(debug.traceback())
-		err = cl.CL_BUILD_PROGRAM_FAILURE
+		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 	end)
 	return err
 end
@@ -931,7 +1012,7 @@ function cl.clReleaseKernel(kernel) end
 
 function cl.clGetKernelInfo(kernel, name, paramSize, resultPtr, sizePtr)
 	print('clGetKernelInfo', kernel, name, paramSize, resultPtr, sizePtr)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 function cl.clCreateKernel(programHandle, kernelName, errPtr)
@@ -963,7 +1044,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	local func = program.lib[kernelName]
 	print('func', func)
 
-	if errPtr then errPtr[0] = cl.CL_SUCCESS end
+	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
 	local kernelHandle = ffi.new'struct _cl_kernel[1]'
 	kernelHandle[0].id = #kernelsForID+1
 	kernelsForID[kernelHandle[0].id] = {
@@ -979,16 +1060,16 @@ function cl.clSetKernelArg(kernelHandle, index, size, ptr)
 	local kernel = kernelsForID[kernelHandle[0].id]
 	kernel.args[index+1] = ptr	--{size, ptr}
 	kernel.args.n = math.max(kernel.args.n, index+1)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 function cl.clGetKernelWorkGroupInfo(kernelHandle, device, nameValue, typeSize, result, a)
-	if nameValue == cl.CL_KERNEL_WORK_GROUP_SIZE then
+	if nameValue == ffi.C.CL_KERNEL_WORK_GROUP_SIZE then
 		result[0] = 16
 	else
 		print('clGetKernelWorkGroupInfo', kernelHandle, device, nameValue, typeSize, result, a)
 	end
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 -- COMMAND QUEUE
@@ -997,7 +1078,7 @@ function cl.clRetainCommandQueue(cmds) end
 function cl.clReleaseCommandQueue(cmds) end
 
 function cl.clCreateCommandQueue(ctx, device, properties, errPtr)
-	if errPtr then errPtr[0] = cl.CL_SUCCESS end
+	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
 	local cmds = ffi.new'struct _cl_command_queue[1]'
 	cmds[0].id = 0
 	return cmds
@@ -1005,7 +1086,7 @@ end
 
 function cl.clGetCommandQueueInfo(cmds, name, paramSize, param, paramSizePtr)
 	print('clGetCommandQueueInfo', cmds, name, paramSize, param, paramSizePtr)
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
 function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event)
@@ -1069,12 +1150,116 @@ print('calling...')
 		end
 	end
 print('clEnqueueNDRangeKernel done')
-	return cl.CL_SUCCESS
+	return ffi.C.CL_SUCCESS
 end
 
-
-
 function cl.clFinish() end
+
+-- EVENT
+
+-- TODO refcount or something if you care, but I don't
+function cl.clRetainEvent(event) end
+function cl.clReleaseEvent(event) end
+
+cl.clGetEventInfo = makeGetter{
+	name = 'clGetEventInfo',
+	-- 1.0:
+	[ffi.C.CL_EVENT_COMMAND_QUEUE] = {
+		type = 'cl_command_queue',
+		get = function()
+			return 0
+		end,
+	},
+	[ffi.C.CL_EVENT_COMMAND_TYPE] = {
+		type = 'cl_command_type',
+		get = function()
+		--[[ one of:
+CL_COMMAND_NDRANGE_KERNEL
+CL_COMMAND_NATIVE_KERNEL
+CL_COMMAND_READ_BUFFER
+CL_COMMAND_WRITE_BUFFER
+CL_COMMAND_COPY_BUFFER
+CL_COMMAND_READ_IMAGE
+CL_COMMAND_WRITE_IMAGE
+CL_COMMAND_COPY_IMAGE
+CL_COMMAND_COPY_BUFFER_TO_IMAGE
+CL_COMMAND_COPY_IMAGE_TO_BUFFER
+CL_COMMAND_MAP_BUFFER
+CL_COMMAND_MAP_IMAGE
+CL_COMMAND_UNMAP_MEM_OBJECT
+CL_COMMAND_MARKER
+CL_COMMAND_ACQUIRE_GL_OBJECTS
+CL_COMMAND_RELEASE_GL_OBJECTS
+CL_COMMAND_READ_BUFFER_RECT
+CL_COMMAND_WRITE_BUFFER_RECT
+CL_COMMAND_COPY_BUFFER_RECT
+CL_COMMAND_USER
+CL_COMMAND_BARRIER
+CL_COMMAND_MIGRATE_MEM_OBJECTS
+CL_COMMAND_FILL_BUFFER
+CL_COMMAND_FILL_IMAGE
+CL_COMMAND_SVM_FREE
+CL_COMMAND_SVM_MEMCPY
+CL_COMMAND_SVM_MEMFILL
+CL_COMMAND_SVM_MAP
+CL_COMMAND_SVM_UNMAP	
+			--]]		
+			return 0
+		end,
+	},
+	[ffi.C.CL_EVENT_REFERENCE_COUNT] = {
+		type = 'cl_uint',
+		get = function()
+			return 0
+		end,
+	},
+	[ffi.C.CL_EVENT_COMMAND_EXECUTION_STATUS] = {
+		type = 'cl_int',
+		get = function()
+			--[[
+CL_QUEUED
+CL_SUBMITTED
+CL_RUNNING
+CL_COMPLETE
+or error code
+			--]]
+			return ffi.C.CL_COMPLETE
+		end,
+	},
+	-- 1.1
+	[ffi.C.CL_EVENT_CONTEXT] = {
+		type = 'cl_context',
+		get = function()
+			return 0	-- TODO give clcpu's contexts unique numbers
+		end,
+	},
+}
+
+cl.clGetEventProfilingInfo = makeGetter{
+	name = 'clGetEventProfilingInfo',
+	-- 1.0
+	[ffi.C.CL_PROFILING_COMMAND_QUEUED] = {
+		type = 'cl_ulong',
+		get = function() return 0 end,
+	},
+	[ffi.C.CL_PROFILING_COMMAND_SUBMIT] = {
+		type = 'cl_ulong',
+		get = function() return 0 end,
+	},
+	[ffi.C.CL_PROFILING_COMMAND_START] = {
+		type = 'cl_ulong',
+		get = function() return 0 end,
+	},
+	[ffi.C.CL_PROFILING_COMMAND_END] = {
+		type = 'cl_ulong',
+		get = function() return 0 end,
+	},
+	-- 2.0
+	[ffi.C.CL_PROFILING_COMMAND_COMPLETE] = {
+		type = 'cl_ulong',
+		get = function() return 0 end,
+	},
+}
 
 setmetatable(cl, {__index=ffi.C})
 return cl
