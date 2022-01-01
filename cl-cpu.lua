@@ -7,6 +7,7 @@ Maybe later I'll make a C++ version.
 local ffi = require 'ffi'
 local table = require 'ext.table'
 local io = require 'ext.io'
+local string = require 'ext.string'
 local template = require 'template'
 
 -- copied from ffi/OpenCL.lua
@@ -145,7 +146,7 @@ enum {
   CL_FP_ROUND_TO_ZERO                          = 0x08,
   CL_FP_ROUND_TO_INF                           = 0x10,
   CL_FP_FMA                                    = 0x20,
-  CL_FP_SOFT_FLOAT                             = 0x40, 
+  CL_FP_SOFT_FLOAT                             = 0x40,
   CL_NONE                                      = 0x0,
   CL_READ_ONLY_CACHE                           = 0x1,
   CL_READ_WRITE_CACHE                          = 0x2,
@@ -509,7 +510,7 @@ enum {
   CL_GL_OBJECT_TEXTURE3D                 = 0x2002,
   CL_GL_OBJECT_RENDERBUFFER              = 0x2003,
   CL_GL_TEXTURE_TARGET                   = 0x2004,
-  CL_GL_MIPMAP_LEVEL                     = 0x2005,  
+  CL_GL_MIPMAP_LEVEL                     = 0x2005,
   CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR = -1000,
   CL_CURRENT_DEVICE_FOR_GL_CONTEXT_KHR   = 0x2006,
   CL_DEVICES_FOR_GL_CONTEXT_KHR          = 0x2007,
@@ -570,7 +571,7 @@ local function makeGetter(args)
 			if var.getString then
 				-- this will do the writing to resultPtr and/or sizePtr
 				return var.getString(resultPtr, sizePtr) or ffi.C.CL_SUCCESS
-			else	
+			else
 				-- copy by ref
 				local value, err = var.get()
 				if err then
@@ -676,7 +677,7 @@ function cl.clGetContextInfo(ctx, name, count, ctxIDs, countPtr)
 	return ffi.C.CL_SUCCESS
 end
 
-function cl.clCreateContext(properties, numDevices, deviceIDs, notify, x, errPtr) 
+function cl.clCreateContext(properties, numDevices, deviceIDs, notify, x, errPtr)
 	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
 	local ctx = ffi.new'struct _cl_context[1]'
 	ctx[0].id = 0
@@ -772,7 +773,7 @@ function cl.clGetProgramInfo(programHandle, name, paramSize, resultPtr, sizePtr)
 		if resultPtr == nil then
 			ffi.cast('size_t*', sizePtr)[0] = ffi.sizeof'unsigned char*'
 		else
-			ffi.cast('unsigned char**', resultPtr)[0] = program.libdata
+			ffi.cast('unsigned char**', resultPtr)[0] = ffi.cast('unsigned char*', program.libdata)
 		end
 
 	else
@@ -785,7 +786,10 @@ function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, result
 	local id = programHandle[0].id
 	local program = assert(programsForID[id])
 	if name == ffi.C.CL_PROGRAM_BUILD_LOG then
-		getString(program.compileLog..'\n'..program.linkLog, resultPtr, sizePtr)
+		local log = table()
+		log:insert(program.compileLog)
+		log:insert(program.linkLog)
+		getString(log:concat'\n', resultPtr, sizePtr)
 	else
 		print('clGetProgramBuildInfo', programHandle, name, paramSize, resultPtr, sizePtr)
 	end
@@ -795,18 +799,18 @@ end
 function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, errPtr)
 	-- I'm creating the program entry up front
 	-- so there can be dead programs in the table
-	-- but the tradeoff is that I can also now use the program unique ID in the program's code gen 
+	-- but the tradeoff is that I can also now use the program unique ID in the program's code gen
 	local programHandle = ffi.new'struct _cl_program[1]'
 	local id = #programsForID+1
 	programHandle[0].id = id
-print('adding program entry', id)	
+print('adding program entry', id)
 	programsForID[id] = {id=id}
 	
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local code = table{
 		template([[
-<? 
-local ffi = require 'ffi' 
+<?
+local ffi = require 'ffi'
 if ffi.os == 'Windows' then
 ?>
 #define __attribute__(x)
@@ -908,6 +912,7 @@ EXTERN size_t _program_<?=id?>_group_id_1 = 0;
 EXTERN size_t _program_<?=id?>_group_id_2 = 0;
 #define get_group_id(n)	_program_<?=id?>_group_id_##n
 
+<? if false then ?>
 int4 int4_add(int4 a, int4 b) {
 	return (int4){
 		a.x + b.x,
@@ -916,6 +921,7 @@ int4 int4_add(int4 a, int4 b) {
 		a.w + b.w,
 	};
 }
+<? end ?>
 
 ]], 	{
 			id = id,
@@ -925,7 +931,7 @@ int4 int4_add(int4 a, int4 b) {
 	for i=0,numStrings-1 do
 		code:insert(ffi.string(stringsPtr[i], lengthsPtr[i]))
 	end
-	code = code:concat'\n'	
+	code = code:concat'\n'
 
 -- hmm, typedef with a cl vector type, which uses constructor syntax not supported by C...
 local realtype = code:match'typedef%s+(%S*)%s+real;'
@@ -962,7 +968,7 @@ function cl.clBuildProgram(programHandle, numDevices, deviceIDs, options, a, b)
 print('compiling program entry', id)
 	local program = programsForID[id]
 	xpcall(function()
-		local result = gcc:compile(program.code) 
+		local result = gcc:compile(program.code)
 		if result.error then error(result.error) end
 print('done compiling program entry', id)
 		
@@ -1015,30 +1021,95 @@ function cl.clGetKernelInfo(kernel, name, paramSize, resultPtr, sizePtr)
 	return ffi.C.CL_SUCCESS
 end
 
+
+-- from my lua-preproc project ...
+local function removeCommentsAndApplyContinuations(code)
+	
+	-- should line continuations \ affect single-line comments?
+	-- if so then do this here
+	-- or should they not?  then do this after.
+	repeat
+		local i, j = code:find('\\%s*\n')
+		if not i then break end
+		code = code:sub(1,i-1)..' '..code:sub(j+1)
+	until false
+
+	-- remove all /* */ blocks first
+	repeat
+		local i = code:find('/*',1,true)
+		if not i then break end
+		local j = code:find('*/',i+2,true)
+		if not j then
+			error("found /* with no */")
+		end
+		code = code:sub(1,i-1)..code:sub(j+2)
+	until false
+
+	-- [[ remove all // \n blocks first
+	repeat
+		local i = code:find('//',1,true)
+		if not i then break end
+		local j = code:find('\n',i+2,true) or #code
+		code = code:sub(1,i-1)..code:sub(j)
+	until false
+	--]]
+
+	return code
+end
+
+
+
 function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	local program = assert(programsForID[programHandle[0].id])
-	
+
+	local code = removeCommentsAndApplyContinuations(program.code)
+
 	print('searching for kernel', kernelName)
 	
 	-- TODO how to get the signature?
 	-- search for it in the code maybe?
 
-	local sig = program.code:match('kernel void '..kernelName..'[^)]*%)')
-	print('found with signature', sig)
-	-- ffi can't handle the #define's so well ... so get rid of the 'kernel' prefix
-	sig = sig:sub(8)
-	-- same with this one
-	sig = sig:gsub('constant', 'const')
-	-- and this is dangerous since lua's regex can't handle word boundaries
-	sig = sig:gsub('global', '')
-	sig = sig:gsub('local', '')
-	-- next problem: some of the signatures use types that haven't been defined
-	-- and luajit ffi can't redefine typedefs
-	-- so I don't want to try to define them with LuaJIT
-	-- instead: convert them to void* manually...
-	sig = sig:gsub('[%w_][%w%d_]*%s*%*', 'void*')
+	local sig = code:match('kernel%s+void%s+'..kernelName..'%s*%([^)]*%)')
+	print('found with signature:\n'..sig:gsub('%s+', ' '))
+
+	local sigargs = sig:match('^kernel%s+void%s+'..kernelName..'%s*%(([^)]*)%)$')
+	assert(sigargs, "doesn't match a kernel void")
+	if true then
+		-- split by comma and parse each arg separately
+		sigargs = string.split(sigargs, ','):mapi(function(arg)
+			arg = string.trim(arg)
+			local tokens = string.split(arg, '%s+')
+			-- split off any *'s into unique tokens
+			-- TODO how about []'s?
+			for i=#tokens,1,-1 do
+				while tokens[i]:sub(-1) == '*' do
+					table.insert(tokens, i+1, '*')
+					tokens[i] = tokens[i]:sub(1,-2)
+				end
+			end
+			tokens:removeObject'global'
+			tokens:removeObject'local'
+			for i=1,#tokens do 	-- TODO table.replace?  how have I never needed table.replace until now?
+				if tokens[i] == 'constant' then tokens[i] = 'const' end
+			end
+
+			local varname = tokens:remove()	-- assume the last is the variable name
+			
+			-- ok now if the 2nd-to-last is a * then replace all type tokens with 'void*'
+			if tokens:find'*' then
+				tokens = table{'void', '*'}
+			end
+
+			tokens:insert(varname)
+
+			return tokens:concat' '
+		end):concat', '
+		-- now replace "constant structname const *" => "const void const *" with just "void *"
+	
+		sig = 'void '..kernelName.. '(' .. sigargs .. ')'
+	end
 	sig = sig .. ';'
-	print("cdef'ing as sig", sig)
+	print("cdef'ing as sig:\n"..sig)
 	ffi.cdef(sig)
 
 	local func = program.lib[kernelName]
@@ -1090,6 +1161,7 @@ function cl.clGetCommandQueueInfo(cmds, name, paramSize, param, paramSizePtr)
 end
 
 function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event)
+print(debug.traceback())
 print('clEnqueueNDRangeKernel', cmds, kernelHandle, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event)
 	local kernel = kernelsForID[kernelHandle[0].id]
 print('kernel', kernel.name)
@@ -1101,14 +1173,16 @@ print('program', program.libfile)
 	for i=1,args.n do
 		local arg = args[i]
 		if type(arg) == 'cdata' then
-			if ffi.typeof(arg) == 'ctype<struct _cl_mem *[1]>' then
-				args[i] = arg.ptr
+			local typename = tostring(ffi.typeof(arg))
+			if typename  == 'ctype<struct _cl_mem *[1]>' then
+				args[i] = arg[0][0].ptr
 			else
-print('WARNING: passing cdata of type',ffi.typeof(arg))			
+			-- otherwise, for arguments of type say "int", the passed type will be "ctype<int [1]>"
+print('WARNING: passing cdata of type', typename)
 			end
 		end
 	end
-print('calling...')	
+print('calling...')
 	local global_work_offset_v = {}
 	local global_work_size_v = {}
 	local local_work_size_v = {}
@@ -1202,8 +1276,8 @@ CL_COMMAND_SVM_FREE
 CL_COMMAND_SVM_MEMCPY
 CL_COMMAND_SVM_MEMFILL
 CL_COMMAND_SVM_MAP
-CL_COMMAND_SVM_UNMAP	
-			--]]		
+CL_COMMAND_SVM_UNMAP
+			--]]
 			return 0
 		end,
 	},
