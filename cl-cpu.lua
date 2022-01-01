@@ -28,6 +28,12 @@ enum {
   CL_MAP_FAILURE                               = -12,
   CL_MISALIGNED_SUB_BUFFER_OFFSET              = -13,
   CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST = -14,
+  CL_COMPILE_PROGRAM_FAILURE                  = -15,
+  CL_LINKER_NOT_AVAILABLE                     = -16,
+  CL_LINK_PROGRAM_FAILURE                     = -17,
+  CL_DEVICE_PARTITION_FAILED                  = -18,
+  CL_KERNEL_ARG_INFO_NOT_AVAILABLE            = -19,
+
   CL_INVALID_VALUE                             = -30,
   CL_INVALID_DEVICE_TYPE                       = -31,
   CL_INVALID_PLATFORM                          = -32,
@@ -530,6 +536,7 @@ struct _cl_command_queue { int id; };
 struct _cl_event { int id; };
 
 struct _cl_mem {
+	size_t verify;
 	size_t size;
 	uint8_t* ptr;
 };
@@ -546,46 +553,75 @@ struct _cl_kernel {
 
 local cl = {}
 
-local function getString(name, resultPtr, sizePtr)
-	if sizePtr then
-		sizePtr[0] = #name + 1
-	else
-		assert(resultPtr)
-		ffi.copy(resultPtr, name)
+local function getString(strValue, resultPtr, sizePtr)
+	if sizePtr ~= nil then
+		sizePtr[0] = #strValue + 1
+	end
+	if resultPtr ~= nil then
+		ffi.copy(resultPtr, strValue)
 	end
 end
 
 
+local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr)
+--print(debug.traceback())
+--print(args.name, id, name)--, paramSize, resultPtr, sizePtr)
+	
+	local var = args[name]
+	if not var then return ffi.C.CL_INVALID_VALUE end
+
+-- assert that our pointers are already the right type ... ?
+
+--print('var.type', var.type)
+	local casttype
+	if var.type:sub(-2) == '[]' then
+		-- assume it's a pointer to the array
+		casttype = var.type:sub(1,-3) .. '*'
+	else
+	-- assume it's a pointer to the value
+		casttype = var.type
+	end
+--print('casting to '..casttype)
+	resultPtr = ffi.cast(casttype, resultPtr)
+
+	-- this crashes us immediately ... hmm ... 
+	sizePtr = ffi.cast('size_t*', sizePtr)
+
+--print('resultPtr', resultPtr)
+--print('sizePtr', sizePtr)
+
+	-- TODO this should be used for array getters, not just string getters
+	if var.getString then
+		local strValue = var.getString()
+
+		if sizePtr ~= nil then
+			sizePtr[0] = #strValue + 1
+		end
+		
+		if resultPtr ~= nil then
+			ffi.copy(resultPtr, strValue)
+		end
+	else
+		-- single-value POD results:
+		if sizePtr ~= nil then
+			sizePtr[0] = ffi.sizeof(var.type)
+		end
+		if resultPtr ~= nil then
+			-- copy by ref
+			local value, err = var.get()
+			if err then
+				return err
+			end
+			resultPtr[0] = value
+		end
+	end
+	
+	return ffi.C.CL_SUCCESS
+end
 
 local function makeGetter(args)
 	return function(id, name, paramSize, resultPtr, sizePtr)
-		print(args.name, id, name)--, paramSize, resultPtr, sizePtr)
-		
-		local var = args[name]
-		if not var then return ffi.C.CL_INVALID_VALUE end
-	
--- assert that our pointers are already the right type ... ?
---		sizePtr = ffi.cast(var.type..'*', sizePtr)
---		resultPtr = ffi.cast(var.type..'*', resultPtr)
-		if resultPtr ~= nil then
-			if var.getString then
-				-- this will do the writing to resultPtr and/or sizePtr
-				return var.getString(resultPtr, sizePtr) or ffi.C.CL_SUCCESS
-			else
-				-- copy by ref
-				local value, err = var.get()
-				if err then
-					return err
-				end
-				resultPtr[0] = value
-				
-				if sizePtr ~= nil then
-					sizePtr[0] = ffi.sizeof(var.type)
-				end
-			end
-		end
-		
-		return ffi.C.CL_SUCCESS
+		return handleGetter(args, id, name, paramSize, resultPtr, sizePtr)
 	end
 end
 
@@ -597,32 +633,32 @@ cl.clGetPlatformInfo = makeGetter{
 	name = 'clGetPlatformInfo',
 	[ffi.C.CL_PLATFORM_PROFILE] = {
 		type = 'char[]',
-		getString = function(resultPtr, sizePtr)
-			return getString('FULL_PROFILE', resultPtr, sizePtr)
+		getString = function()
+			return 'FULL_PROFILE'
 		end,
 	},
 	[ffi.C.CL_PLATFORM_VERSION] = {
 		type = 'char[]',
-		getString = function(resultPtr, sizePtr)
-			return getString('OpenCL 1.1', resultPtr, sizePtr)
+		getString = function()
+			return 'OpenCL 1.1'
 		end,
 	},
 	[ffi.C.CL_PLATFORM_NAME] = {
 		type = 'char[]',
-		getString = function(resultPtr, sizePtr)
-			return getString('CPU debug implementation', resultPtr, sizePtr)
+		getString = function()
+			return 'CPU debug implementation'
 		end,
 	},
 	[ffi.C.CL_PLATFORM_VENDOR] = {
 		type = 'char[]',
-		getString = function(resultPtr, sizePtr)
-			return getString('Christopher Moore', resultPtr, sizePtr)
+		getString = function()
+			return 'Christopher Moore'
 		end,
 	},
 	[ffi.C.CL_PLATFORM_EXTENSIONS] = {
 		type = 'char[]',	-- separator=' '
-		getString = function(resultPtr, sizePtr)
-			return getString('', resultPtr, sizePtr)
+		getString = function()
+			return ''
 		end,
 	},
 }
@@ -703,13 +739,61 @@ end
 
 -- BUFFER
 
-function cl.clCreateBuffer(ctxID, flags, size, hostptr, errPtr)
-	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
+
+local allMems = table()
+
+local cl_mem_verify = ffi.new('size_t', 0xdeadbeefdeadbeef)
+
+--[[
+returns cl_mem
+which I have typecast to a _cl_mem*
+and so in luajit I'm returning a _cl_mem[1]
+so that it will act like a _cl_mem*
+--]]
+function cl.clCreateBuffer(ctxID, flags, size, hostPtr, errPtr)
+	ctxID = ffi.cast('cl_context', ctxID)
+	flags = ffi.cast('cl_mem_flags', flags)
+	size = ffi.cast('size_t', size)
+	hostPtr = ffi.cast('void*', hostPtr)
+	errPtr = ffi.cast('cl_int*', errPtr)
+print('clCreateBuffer', ctxID, flags, size, hostPtr, errPtr)	
+	
+	if size == 0 then
+		if errPtr ~= nil then 
+			errPtr[0] = ffi.C.CL_INVALID_BUFFER_SIZE
+		end
+		return
+	end
+	-- TODO if size > CL_DEVICE_MAX_MEM_ALLOC_SIZE then return CL_INVALID_BUFFER_SIZE
+
+	local reqHost = bit.band(flags, bit.bor(ffi.C.CL_MEM_USE_HOST_PTR, ffi.C.CL_MEM_COPY_HOST_PTR)) ~= 0
+	if (reqHost and hostPtr == nil)
+	or (not reqHost and hostPtr ~= nil)
+	then
+		if errPtr ~= nil then
+			errPtr[0] = ffi.C.CL_INVALID_HOST_PTR
+		end
+		return
+	end
+
 	local mem = ffi.new'struct _cl_mem[1]'
-	mem[0].ptr = ffi.new('uint8_t[?]', size)
+
+	-- TODO upon fail here, return CL_MEM_OBJECT_ALLOCATION_FAILURE or CL_OUT_OF_HOST_MEMORY
+	local ptr = ffi.new('uint8_t[?]', size)
+
+print('ptr', ptr)
+print('size', size)
+	mem[0].verify = cl_mem_verify
+	mem[0].ptr = ptr
 	mem[0].size = size
-	if hostPtr then ffi.copy(mem[0].ptr, hostPtr, size) end
-	return mem
+	allMems:insert(mem)	-- don't let luajit gc it.  TODO refcount / retain / release to keep track of it that way
+	
+	if reqHost then ffi.copy(mem[0].ptr, hostPtr, size) end
+	
+	if errPtr ~= nil then 
+		errPtr[0] = ffi.C.CL_SUCCESS 
+	end
+	return ffi.cast('cl_mem', mem)	-- return the ptr, not the obj, so ffi.sizeof says it's a ptr size, not the obj size (which is double)
 end
 
 local function handleEvents(numWaitListEvents, waitListEvents, event)
@@ -736,14 +820,68 @@ end
 
 local int0 = ffi.new('int[1]', 0)
 function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
-	handleEvents(numWaitListEvents, waitListEvents, event)
-	pattern = pattern or int0
+print(debug.traceback())
+--print('clEnqueueFillBuffer', cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
 	pattern = ffi.cast('uint8_t*', pattern)
-	if not patternSize then patternSize = ffi.sizeof(int0) end
-	for i=0,size-1 do
-		buffer[0].ptr[offset+i] = pattern[i%patternSize]
+	offset = ffi.cast('size_t', offset)
+	size = ffi.cast('size_t', size)
+	patternSize = ffi.cast('size_t', patternSize)
+print('clEnqueueFillBuffer', cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
+print('buffer size', buffer[0].size)
+print('buffer ptr', buffer[0].ptr)
+print('ffi sizeof buffer ptr', ffi.sizeof(buffer[0].ptr))
+	handleEvents(numWaitListEvents, waitListEvents, event)
+	
+	if pattern == nil then
+		return ffi.C.CL_INVALID_VALUE
 	end
-	--ffi.fill(buffer[0].ptr + offset, pattern, size)
+	
+	if patternSize ~= 1
+	and patternSize ~= 2
+	and patternSize ~= 4
+	and patternSize ~= 8
+	and patternSize ~= 16
+	and patternSize ~= 32
+	and patternSize ~= 64
+	and patternSize ~= 128
+	then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	patternSize = tonumber(patternSize)
+
+	if size % patternSize ~= 0 then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	
+	if offset + size > buffer[0].size then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	if buffer[0].ptr == nil then
+		return ffi.C.CL_INVALID_MEM_OBJECT
+	end
+
+	local isZero = true
+	for i=0,patternSize-1 do
+		if pattern[i] ~= 0 then
+			isZero = false
+			break
+		end
+	end
+	if isZero then
+print(debug.traceback())
+		ffi.fill(buffer[0].ptr + offset, size)
+print(debug.traceback())
+	else
+print(debug.traceback())
+		local i = ffi.cast('size_t', 0)
+		while i < size do
+			buffer[0].ptr[offset+i] = pattern[i%patternSize]
+			i = i + 1
+		end
+print(debug.traceback())
+	end
+
 	return ffi.C.CL_SUCCESS
 end
 
@@ -912,16 +1050,14 @@ EXTERN size_t _program_<?=id?>_group_id_1 = 0;
 EXTERN size_t _program_<?=id?>_group_id_2 = 0;
 #define get_group_id(n)	_program_<?=id?>_group_id_##n
 
-<? if false then ?>
 int4 int4_add(int4 a, int4 b) {
 	return (int4){
-		a.x + b.x,
-		a.y + b.y,
-		a.z + b.z,
-		a.w + b.w,
+		.x = a.x + b.x,
+		.y = a.y + b.y,
+		.z = a.z + b.z,
+		.w = a.w + b.w,
 	};
 }
-<? end ?>
 
 ]], 	{
 			id = id,
@@ -1060,6 +1196,8 @@ end
 
 
 function cl.clCreateKernel(programHandle, kernelName, errPtr)
+print(debug.traceback())
+print('clCreateKernel', programHandle, kernelName, errPtr)	
 	local program = assert(programsForID[programHandle[0].id])
 
 	local code = removeCommentsAndApplyContinuations(program.code)
@@ -1074,41 +1212,57 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 
 	local sigargs = sig:match('^kernel%s+void%s+'..kernelName..'%s*%(([^)]*)%)$')
 	assert(sigargs, "doesn't match a kernel void")
-	if true then
-		-- split by comma and parse each arg separately
-		sigargs = string.split(sigargs, ','):mapi(function(arg)
-			arg = string.trim(arg)
-			local tokens = string.split(arg, '%s+')
-			-- split off any *'s into unique tokens
-			-- TODO how about []'s?
-			for i=#tokens,1,-1 do
-				while tokens[i]:sub(-1) == '*' do
-					table.insert(tokens, i+1, '*')
-					tokens[i] = tokens[i]:sub(1,-2)
-				end
+		
+	-- split by comma and parse each arg separately
+	-- let's hope there's no macros in there with commas in them
+	local argInfos = table()
+	sigargs = string.split(sigargs, ','):mapi(function(arg,i)
+		argInfos[i] = {}
+		
+		arg = string.trim(arg)
+		local tokens = string.split(arg, '%s+')
+		-- split off any *'s into unique tokens
+		-- TODO how about []'s?
+		for i=#tokens,1,-1 do
+			while tokens[i]:sub(-1) == '*' do
+				table.insert(tokens, i+1, '*')
+				tokens[i] = tokens[i]:sub(1,-2)
 			end
-			tokens:removeObject'global'
-			tokens:removeObject'local'
-			for i=1,#tokens do 	-- TODO table.replace?  how have I never needed table.replace until now?
-				if tokens[i] == 'constant' then tokens[i] = 'const' end
+		
+			if tokens[i] == 'global' then
+				table.remove(tokens, i)
+				argInfos[i].isGlobal = true
+			elseif tokens[i] == 'local' then
+				table.remove(tokens, i)
+				argInfos[i].isLocal = true
 			end
+		end
+		for i=1,#tokens do 	-- TODO table.replace?  how have I never needed table.replace until now?
+			if tokens[i] == 'constant' then tokens[i] = 'const' end
+		end
 
-			local varname = tokens:remove()	-- assume the last is the variable name
-			
-			-- ok now if the 2nd-to-last is a * then replace all type tokens with 'void*'
-			if tokens:find'*' then
-				tokens = table{'void', '*'}
-			end
+		local varname = tokens:remove()	-- assume the last is the variable name
+		argInfos[i].name = varname
 
-			tokens:insert(varname)
+		-- ok now if the 2nd-to-last is a * then replace all type tokens with 'void*'
+		if tokens:find'*' then
+			tokens = table{'void', '*'}
+		end
 
-			return tokens:concat' '
-		end):concat', '
-		-- now replace "constant structname const *" => "const void const *" with just "void *"
+		argInfos[i].type = tokens:concat' '
+
+		tokens:insert(varname)
+
+		return tokens:concat' '
+	end)
+	local numargs = #sigargs
+	assert(#argInfos == numargs)
+
+	sigargs = sigargs:concat', '
+	-- now replace "constant structname const *" => "const void const *" with just "void *"
+
+	sig = 'void '..kernelName.. '(' .. sigargs .. ');'
 	
-		sig = 'void '..kernelName.. '(' .. sigargs .. ')'
-	end
-	sig = sig .. ';'
 	print("cdef'ing as sig:\n"..sig)
 	ffi.cdef(sig)
 
@@ -1122,23 +1276,74 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		name = kernelName,
 		program = program,
 		func = func,
-		args = {n=0},
+		argInfos = argInfos,		-- holds for each arg: name, type, isGlobal, isLocal
+		args = {},					-- holds the clSetKernelArg() values
+		numargs = numargs,
+		isGlobal = isGlobal,
+		isLocal = isLocal,
 	}
+	
+	print('returning kernel handle', kernelHandle[0].id)
+
 	return kernelHandle
 end
 
-function cl.clSetKernelArg(kernelHandle, index, size, ptr)
+function cl.clSetKernelArg(kernelHandle, index, size, value)
+	kernelHandle = ffi.cast('cl_kernel', kernelHandle)
+	index = ffi.cast('cl_uint', index)
+	size = ffi.cast('size_t', size)
+	value = ffi.cast('void*', value)
+	
 	local kernel = kernelsForID[kernelHandle[0].id]
-	kernel.args[index+1] = ptr	--{size, ptr}
-	kernel.args.n = math.max(kernel.args.n, index+1)
+	if not kernel then
+		return ffi.C.CL_INVALID_KERNEL
+	end
+	if index >= kernel.numargs then
+		return ffi.C.CL_INVALID_ARG_INDEX
+	end
+	local argInfo = kernel.argInfos[tonumber(index)+1]
+	assert(argInfo, "tried to set kernel arg "..tonumber(index)
+		.." but arginfo is nil, only has "..#kernel.argInfos
+		.." though numargs is "..kernel.numargs)
+
+	-- if the kernel arg isn't local then the value can't be null ...
+	if value == nil then
+		if not argInfo.isLocal then
+			return ffi.C.CL_INVALID_ARG_VALUE
+		end
+	end
+	
+	-- if the kernel arg is global then the value better be a cl_mem ...
+	if argInfo.isGlobal then
+		value = ffi.cast('cl_mem*', value)
+		if value[0][0].verify ~= cl_mem_verify then
+			return ffi.C.CL_INVALID_MEM_OBJECT
+		end
+	
+		if size ~= ffi.sizeof'cl_mem' then	-- which is a ptr's size ...
+			return ffi.C.CL_INVALID_ARG_SIZE
+		end
+	else
+		if size ~= ffi.sizeof(argInfo.type) then
+			return ffi.C.CL_INVALID_ARG_SIZE
+		end
+	end	
+
+	-- mind you value is a void* by now. 
+	-- if it's a global then it points to a struct _cl_mem
+	kernel.args[tonumber(index)+1] = value	-- {size, value}
+	
 	return ffi.C.CL_SUCCESS
 end
 
-function cl.clGetKernelWorkGroupInfo(kernelHandle, device, nameValue, typeSize, result, a)
-	if nameValue == ffi.C.CL_KERNEL_WORK_GROUP_SIZE then
-		result[0] = 16
+function cl.clGetKernelWorkGroupInfo(kernelID, deviceID, name, paramSize, resultPtr, sizePtr)
+	if name == ffi.C.CL_KERNEL_WORK_GROUP_SIZE then
+		resultPtr = ffi.cast('size_t*', resultPtr)
+		if resultPtr ~= nil then
+			resultPtr[0] = 16
+		end
 	else
-		print('clGetKernelWorkGroupInfo', kernelHandle, device, nameValue, typeSize, result, a)
+		print('clGetKernelWorkGroupInfo', kernelID, deviceID, name, paramSize, resultPtr, sizePtr)
 	end
 	return ffi.C.CL_SUCCESS
 end
@@ -1170,18 +1375,24 @@ print('program', program.libfile)
 	local pid = program.id
 	local lib = program.lib
 	local args = table(kernel.args)
-	for i=1,args.n do
+	local argInfos = kernel.argInfos
+	for i=1,kernel.numargs do
 		local arg = args[i]
-		if type(arg) == 'cdata' then
-			local typename = tostring(ffi.typeof(arg))
-			if typename  == 'ctype<struct _cl_mem *[1]>' then
-				args[i] = arg[0][0].ptr
-			else
-			-- otherwise, for arguments of type say "int", the passed type will be "ctype<int [1]>"
-print('WARNING: passing cdata of type', typename)
-			end
+		assert(type(arg) == 'cdata')
+		assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')
+		
+		local argInfo = argInfos[i]
+		if argInfo.isGlobal then	-- assert we have a cl_mem ... same with local?
+			arg = ffi.cast('cl_mem*', arg)
+			assert(arg[0][0].verify == cl_mem_verify)
+			args[i] = arg[0][0].ptr
+		elseif argInfo.isLocal then
+			-- use the pointer as-is
+		else
+			args[i] = ffi.cast(argInfo.type..'*', args[i])[0]
 		end
 	end
+
 print('calling...')
 	local global_work_offset_v = {}
 	local global_work_size_v = {}
@@ -1219,7 +1430,7 @@ print('calling...')
 					lib[global_id_fields[n]] = is[n] + global_work_offset_v[n]
 				end
 --io.write('('..table.concat(is, ', ')..') ')
-				kernel.func(table.unpack(args, 1, args.n))
+				kernel.func(table.unpack(args, 1, kernel.numargs))
 			end
 		end
 	end
