@@ -1,9 +1,3 @@
---[[
-I haven't had the best of luck with the CPU OpenCL implementation of Intel OpenCL.
-I guess AMD's CPU OpenCL is dead.
-So for now I'll make a Lua version.
-Maybe later I'll make a C++ version.
---]]
 local ffi = require 'ffi'
 local table = require 'ext.table'
 local io = require 'ext.io'
@@ -78,6 +72,7 @@ enum {
   CL_PLATFORM_NAME                             = 0x0902,
   CL_PLATFORM_VENDOR                           = 0x0903,
   CL_PLATFORM_EXTENSIONS                       = 0x0904,
+  CL_PLATFORM_HOST_TIMER_RESOLUTION            = 0x0905,
   CL_DEVICE_TYPE_DEFAULT                       = 0x01,
   CL_DEVICE_TYPE_CPU                           = 0x02,
   CL_DEVICE_TYPE_GPU                           = 0x04,
@@ -146,6 +141,8 @@ enum {
   CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE         = 0x103B,
   CL_DEVICE_NATIVE_VECTOR_WIDTH_HALF           = 0x103C,
   CL_DEVICE_OPENCL_C_VERSION                   = 0x103D,
+  CL_DEVICE_LINKER_AVAILABLE                   = 0x103E,
+  CL_DEVICE_BUILT_IN_KERNELS                   = 0x103F,
   CL_FP_DENORM                                 = 0x01,
   CL_FP_INF_NAN                                = 0x02,
   CL_FP_ROUND_TO_NEAREST                       = 0x04,
@@ -570,16 +567,32 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr)
 	local var = args[name]
 	if not var then return ffi.C.CL_INVALID_VALUE end
 
+	local tvar = type(var)
+	if tvar == 'string' then
+		var = {type = 'char[]', getString = var}
+	elseif tvar == 'boolean' then
+		var = {type = 'cl_bool', get = function() return var end}
+	elseif tvar == 'table' then
+		local value = var.value
+		if value then
+			assert(var.get == nil)
+			var.get = function() return ffi.cast(var.type, value) end
+			var.value = nil
+		end
+	end
+
 -- assert that our pointers are already the right type ... ?
 
 --print('var.type', var.type)
 	local casttype
+	local arraybasetype	-- only used when var.type ends with []
 	if var.type:sub(-2) == '[]' then
 		-- assume it's a pointer to the array
-		casttype = var.type:sub(1,-3) .. '*'
+		arraybasetype = var.type:sub(1,-3)
+		casttype = arraybasetype .. '*'
 	else
 	-- assume it's a pointer to the value
-		casttype = var.type
+		casttype = var.type .. '*'
 	end
 --print('casting to '..casttype)
 	resultPtr = ffi.cast(casttype, resultPtr)
@@ -591,8 +604,10 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr)
 --print('sizePtr', sizePtr)
 
 	-- TODO this should be used for array getters, not just string getters
+	-- TODO should this only be called when the type ends in a [] ?
 	if var.getString then
-		local strValue = var.getString()
+		local strValue = type(var.getString) == 'string' and var.getString or var.getString()
+		assert(type(strValue) == 'string')
 
 		if sizePtr ~= nil then
 			sizePtr[0] = #strValue + 1
@@ -601,6 +616,8 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr)
 		if resultPtr ~= nil then
 			ffi.copy(resultPtr, strValue)
 		end
+	elseif var.getArray then
+		return var.getArray(resultPtr, sizePtr) or cl.CL_SUCCESS
 	else
 		-- single-value POD results:
 		if sizePtr ~= nil then
@@ -631,74 +648,120 @@ end
 
 cl.clGetPlatformInfo = makeGetter{
 	name = 'clGetPlatformInfo',
-	[ffi.C.CL_PLATFORM_PROFILE] = {
-		type = 'char[]',
-		getString = function()
-			return 'FULL_PROFILE'
-		end,
-	},
-	[ffi.C.CL_PLATFORM_VERSION] = {
-		type = 'char[]',
-		getString = function()
-			return 'OpenCL 1.1'
-		end,
-	},
-	[ffi.C.CL_PLATFORM_NAME] = {
-		type = 'char[]',
-		getString = function()
-			return 'CPU debug implementation'
-		end,
-	},
-	[ffi.C.CL_PLATFORM_VENDOR] = {
-		type = 'char[]',
-		getString = function()
-			return 'Christopher Moore'
-		end,
-	},
-	[ffi.C.CL_PLATFORM_EXTENSIONS] = {
-		type = 'char[]',	-- separator=' '
-		getString = function()
-			return ''
-		end,
+	[ffi.C.CL_PLATFORM_PROFILE] = 'FULL_PROFILE',
+	[ffi.C.CL_PLATFORM_VERSION] = 'OpenCL 1.1',
+	[ffi.C.CL_PLATFORM_NAME] = 'CPU debug implementation',
+	[ffi.C.CL_PLATFORM_VENDOR] = 'Christopher Moore',
+	[ffi.C.CL_PLATFORM_EXTENSIONS] = '',		-- separator=' '
+	[ffi.C.CL_PLATFORM_HOST_TIMER_RESOLUTION] = {
+		type = 'cl_ulong',
+		value = 1,	-- host timer resolution, in nanosecond, used by clGetDeviceAndHostTimer
 	},
 }
 
+local allPlatforms = table{
+	ffi.new('struct _cl_platform_id', {id=0})
+}
+
 function cl.clGetPlatformIDs(count, platformIDs, countPtr)
-	if count == 0 then
+	if count == 0 and platformIDs ~= nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	if platformIDs == nil and countPtr == nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	if countPtr ~= nil then
 		countPtr[0] = 1
-	else
-		platformIDs[0] = ffi.new'struct _cl_platform_id'
-		platformIDs[0].id = 0
+	end
+	if platformIDs ~= nil and count >= 1 then
+		platformIDs[0] = allPlatforms[1]
 	end
 	return ffi.C.CL_SUCCESS
 end
+
 
 -- DEVICE
 
 function cl.clRetainDevice(device) end
 function cl.clReleaseDevice(device) end
 
-function cl.clGetDeviceInfo(device, name, paramSize, resultPtr, sizePtr)
-	if resultPtr ~= nil then
-		if name == ffi.C.CL_DEVICE_EXTENSIONS then
-			getString('', resultPtr, sizePtr)
-		elseif name == ffi.C.CL_DEVICE_NAME then
-			getString('CPU debug implementation', resultPtr, sizePtr)
-		elseif name == ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE then
-			resultPtr[0] = 16
-		else
-			print('clGetDeviceInfo', device, name, paramSize, resultPtr, sizePtr)
-		end
-	end
-	return ffi.C.CL_SUCCESS
-end
+cl.clGetDeviceInfo = makeGetter{
+	name = 'clGetDeviceInfo',
+	[ffi.C.CL_DEVICE_TYPE] = {
+		type = 'cl_device_type',
+		value = ffi.C.CL_DEVICE_TYPE_CPU,
+	},
+	[ffi.C.CL_DEVICE_VENDOR_ID] = {
+		type = 'cl_uint',
+		value = 0,	-- ?
+	},
+	[ffi.C.CL_DEVICE_MAX_COMPUTE_UNITS] = {
+		type = 'cl_uint',
+		value = 1,	-- granted, this could be multi-threaded, but the luajit implementation is only single-threaded
+	},
+	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS] = {
+		type = 'cl_uint',
+		value = 3,
+	},
+	[ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE] = {
+		type = 'size_t',
+		value = 16,
+	},
+	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_SIZES] = {
+		type = 'size_t[]',
+		-- TODO just use get() but when the type ends in [], instead handle mult ret?
+		getArray = function(resultPtr, sizePtr)
+			if sizePtr ~= nil then
+				sizePtr[0] = ffi.sizeof'size_t' * 3	-- * CL_MAX_WORK_ITEM_DIMENSIONS
+			end
+			if resultPtr ~= nil then
+				resultPtr[0] = 256
+				resultPtr[1] = 256
+				resultPtr[2] = 256
+			end
+		end,
+	},
+	[ffi.C.CL_DEVICE_NAME] = 'CPU debug implementation',
+	[ffi.C.CL_DEVICE_VENDOR] = 'Christopher Moore',
+	[ffi.C.CL_DEVICE_PROFILE] = 'FULL_PROFILE',
+	[ffi.C.CL_DEVICE_VERSION] = 'OpenCL 1.1',
+	[ffi.C.CL_DEVICE_EXTENSIONS] = 'cl_khr_fp64',
+	[ffi.C.CL_DEVICE_PLATFORM] = {
+		type = 'cl_platform_id',
+		getArray = function(resultPtr, sizePtr)
+			if sizePtr ~= nil then
+				sizePtr[0] = ffi.sizeof(cl_platform_id)
+			end
+			if resultPtr ~= nil then
+				resultPtr[0] = allPlatforms[1]
+			end
+		end,
+	},
+	[ffi.C.CL_DEVICE_OPENCL_C_VERSION] = 'OpenCL 1.1',
+	[ffi.C.CL_DEVICE_LINKER_AVAILABLE] = false,
+	[ffi.C.CL_DEVICE_BUILT_IN_KERNELS] = '',
+}
+
+local allDevices = table{
+	ffi.new('struct _cl_device_id[1]', {id = 0})
+}
 
 function cl.clGetDeviceIDs(platformID, deviceType, count, deviceIDs, countPtr)
-	if count == 0 then
-		countPtr[0] = 1
+	-- if platformID isn't valid then return CL_INVALID_PLATFORM end
+	-- if deviceType isn't valid then return CL_INVALID_DEVICE_TYPE end
+	if count == 0 and deviceIDs ~= nil then return ffi.C.CL_INVALID_VALUE end
+	-- should I only return success when querying cpus?
+	--if bit.band(deviceType, bit.bor(ffi.C.CL_DEVICE_TYPE_CPU, ffi.C.CL_DEVICE_TYPE_DEFAULT)) ~= 0 then
+	-- or just always?
+	if true then
+		if countPtr ~= nil then
+			countPtr[0] = 1
+		end
+		if deviceIDs ~= nil and count >= 1 then
+			deviceIDs[0] = allDevices[1]
+		end
 	else
-		deviceIDs[0] = ffi.new'struct _cl_device_id[1]'
-		deviceIDs[0].id = 0
+		return ffi.C.CL_DEVICE_NOT_FOUND
 	end
 	return ffi.C.CL_SUCCESS
 end
@@ -708,15 +771,45 @@ end
 function cl.clRetainContext(ctx) end
 function cl.clReleaseContext(ctx) end
 
-function cl.clGetContextInfo(ctx, name, count, ctxIDs, countPtr)
-	print('clGetContextInfo', ctx, name, count, ctxIDs, countPtr)
-	return ffi.C.CL_SUCCESS
-end
+cl.clGetContextInfo = makeGetter{
+	name = 'clGetContextInfo',
+	--[ffi.C.CL_CONTEXT_REFERENCE_COUNT] = ...,
+	[ffi.C.CL_CONTEXT_NUM_DEVICES] = {
+		type = 'cl_uint',
+		value = 1,
+	},
+	[ffi.C.CL_CONTEXT_DEVICES] = {
+		type = 'cl_device_id[]',
+		getArray = function(resultPtr, sizePtr)
+			if sizePtr ~= nil then
+				sizePtr[0] = ffi.sizeof'cl_device_id' * 1
+			end
+			if resultPtr ~= nil then
+				resultPtr[0] = allDevices[1]
+			end
+		end,
+	},
+	[ffi.C.CL_CONTEXT_PROPERTIES] = {
+		type = 'cl_context_properties[]',
+		getArray = function(resultPtr, sizePtr)
+			if sizePtr ~= nil then
+				sizePtr[0] = 0
+			end
+			-- resultPtr doesn't matter ... it's a zero-sized array we are filling
+		end,
+	},
+}
+
+-- TODO multiple contexts? any need yet?
+local allContexts = table{
+	ffi.new('struct _cl_context[1]', {id = 0}),
+}
 
 function cl.clCreateContext(properties, numDevices, deviceIDs, notify, x, errPtr)
-	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
-	local ctx = ffi.new'struct _cl_context[1]'
-	ctx[0].id = 0
+	if errPtr ~= nil then 
+		errPtr[0] = ffi.C.CL_SUCCESS 
+	end
+	local ctx = allContexts[1]
 	return ctx
 end
 
@@ -741,6 +834,7 @@ end
 
 
 local allMems = table()
+local allPtrs = table()	-- because I don't trust luajit to not gc a ptr I ffi.new'd 
 
 local cl_mem_verify = ffi.new('size_t', 0xdeadbeefdeadbeef)
 
@@ -780,6 +874,7 @@ print('clCreateBuffer', ctxID, flags, size, hostPtr, errPtr)
 
 	-- TODO upon fail here, return CL_MEM_OBJECT_ALLOCATION_FAILURE or CL_OUT_OF_HOST_MEMORY
 	local ptr = ffi.new('uint8_t[?]', size)
+	allPtrs:insert(ptr)
 
 print('ptr', ptr)
 print('size', size)
@@ -807,12 +902,16 @@ local function handleEvents(numWaitListEvents, waitListEvents, event)
 end
 
 function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+--print(debug.traceback())
+print('clEnqueueWriteBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
 	handleEvents(numWaitListEvents, waitListEvents, event)
 	ffi.copy(buffer[0].ptr + offset, ptr, size)
 	return ffi.C.CL_SUCCESS
 end
 
 function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+--print(debug.traceback())
+print('clEnqueueReadBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
 	handleEvents(numWaitListEvents, waitListEvents, event)
 	ffi.copy(ptr, buffer[0].ptr + offset, size)
 	return ffi.C.CL_SUCCESS
@@ -820,7 +919,7 @@ end
 
 local int0 = ffi.new('int[1]', 0)
 function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
-print(debug.traceback())
+--print(debug.traceback())
 --print('clEnqueueFillBuffer', cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
 	pattern = ffi.cast('uint8_t*', pattern)
 	offset = ffi.cast('size_t', offset)
@@ -869,17 +968,17 @@ print('ffi sizeof buffer ptr', ffi.sizeof(buffer[0].ptr))
 		end
 	end
 	if isZero then
-print(debug.traceback())
+--print(debug.traceback())
 		ffi.fill(buffer[0].ptr + offset, size)
-print(debug.traceback())
+--print(debug.traceback())
 	else
-print(debug.traceback())
+--print(debug.traceback())
 		local i = ffi.cast('size_t', 0)
 		while i < size do
 			buffer[0].ptr[offset+i] = pattern[i%patternSize]
 			i = i + 1
 		end
-print(debug.traceback())
+--print(debug.traceback())
 	end
 
 	return ffi.C.CL_SUCCESS
@@ -934,6 +1033,8 @@ function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, result
 	return ffi.C.CL_SUCCESS
 end
 
+local allProgramHandles = table()
+
 function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, errPtr)
 	-- I'm creating the program entry up front
 	-- so there can be dead programs in the table
@@ -943,6 +1044,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	programHandle[0].id = id
 print('adding program entry', id)
 	programsForID[id] = {id=id}
+	allProgramHandles[id] = programHandle
 	
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local code = table{
@@ -1139,7 +1241,7 @@ size_t _program_<?=id?>_group_id_2;
 		program.linkLog = result.linkLog
 	end, function(err)
 print('error while compiling: '..err)
-print(debug.traceback())
+--print(debug.traceback())
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 	end)
 	return err
@@ -1196,7 +1298,7 @@ end
 
 
 function cl.clCreateKernel(programHandle, kernelName, errPtr)
-print(debug.traceback())
+--print(debug.traceback())
 print('clCreateKernel', programHandle, kernelName, errPtr)	
 	local program = assert(programsForID[programHandle[0].id])
 
@@ -1217,39 +1319,49 @@ print('clCreateKernel', programHandle, kernelName, errPtr)
 	-- let's hope there's no macros in there with commas in them
 	local argInfos = table()
 	sigargs = string.split(sigargs, ','):mapi(function(arg,i)
-		argInfos[i] = {}
+		local argInfo = {}
+		argInfos[i] = argInfo
 		
 		arg = string.trim(arg)
 		local tokens = string.split(arg, '%s+')
 		-- split off any *'s into unique tokens
 		-- TODO how about []'s?
-		for i=#tokens,1,-1 do
-			while tokens[i]:sub(-1) == '*' do
-				table.insert(tokens, i+1, '*')
-				tokens[i] = tokens[i]:sub(1,-2)
+		for j=#tokens,1,-1 do
+			while tokens[j]:sub(-1) == '*' do
+				table.insert(tokens, j+1, '*')
+				tokens[j] = tokens[j]:sub(1,-2)
 			end
 		
-			if tokens[i] == 'global' then
-				table.remove(tokens, i)
-				argInfos[i].isGlobal = true
-			elseif tokens[i] == 'local' then
-				table.remove(tokens, i)
-				argInfos[i].isLocal = true
+			if tokens[j] == 'global' then
+				table.remove(tokens, j)
+				argInfo.isGlobal = true
+			elseif tokens[j] == 'local' then
+				table.remove(tokens, j)
+				argInfo.isLocal = true
 			end
 		end
-		for i=1,#tokens do 	-- TODO table.replace?  how have I never needed table.replace until now?
-			if tokens[i] == 'constant' then tokens[i] = 'const' end
+		for j=1,#tokens do 	-- TODO table.replace?  how have I never needed table.replace until now?
+			if tokens[j] == 'constant' then
+				tokens[j] = 'const'
+				argInfo.isConstant = true
+			end
 		end
 
 		local varname = tokens:remove()	-- assume the last is the variable name
-		argInfos[i].name = varname
+		argInfo.name = varname
 
-		-- ok now if the 2nd-to-last is a * then replace all type tokens with 'void*'
+		-- keep track of the type to convert to before calling the kernel
+		argInfo.origtype = tokens:concat' '
+		-- or not? idk that i need it -- I'll let the kernel code do the casting
+
+		-- ok now when deducing the link signature, there will be lots of struct ptrs - just convert them to void*
+		-- so if the 2nd-to-last is a * then replace all type tokens with 'void*'
 		if tokens:find'*' then
 			tokens = table{'void', '*'}
 		end
-
-		argInfos[i].type = tokens:concat' '
+		
+		-- treat all ptr args as void*'s
+		argInfo.type = tokens:concat' '
 
 		tokens:insert(varname)
 
@@ -1281,6 +1393,8 @@ print('clCreateKernel', programHandle, kernelName, errPtr)
 		numargs = numargs,
 		isGlobal = isGlobal,
 		isLocal = isLocal,
+		isConstant = isConstant,
+		handle = kernelHandle,		-- hold so luajit doesn't free
 	}
 	
 	print('returning kernel handle', kernelHandle[0].id)
@@ -1314,9 +1428,12 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 	end
 	
 	-- if the kernel arg is global then the value better be a cl_mem ...
-	if argInfo.isGlobal then
-		value = ffi.cast('cl_mem*', value)
-		if value[0][0].verify ~= cl_mem_verify then
+	if argInfo.isGlobal 
+	or argInfo.isConstant
+	then
+		-- clSetKernelArg for globals uses cl_mem[1], which is _cl_mem*[1]
+		local verifyvalue = ffi.cast('cl_mem*', value)
+		if verifyvalue[0][0].verify ~= cl_mem_verify then
 			return ffi.C.CL_INVALID_MEM_OBJECT
 		end
 	
@@ -1324,7 +1441,9 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 			return ffi.C.CL_INVALID_ARG_SIZE
 		end
 	else
-		if size ~= ffi.sizeof(argInfo.type) then
+		if size ~= ffi.sizeof(argInfo.type) 
+		and not argInfo.isLocal -- locals could be pointers to data 
+		then
 			return ffi.C.CL_INVALID_ARG_SIZE
 		end
 	end	
@@ -1350,13 +1469,16 @@ end
 
 -- COMMAND QUEUE
 
+local allCmds = table{
+	ffi.new('struct _cl_command_queue[1]', {id=0}),
+}
+
 function cl.clRetainCommandQueue(cmds) end
 function cl.clReleaseCommandQueue(cmds) end
 
 function cl.clCreateCommandQueue(ctx, device, properties, errPtr)
 	if errPtr then errPtr[0] = ffi.C.CL_SUCCESS end
-	local cmds = ffi.new'struct _cl_command_queue[1]'
-	cmds[0].id = 0
+	local cmds = allCmds[1]
 	return cmds
 end
 
@@ -1366,7 +1488,7 @@ function cl.clGetCommandQueueInfo(cmds, name, paramSize, param, paramSizePtr)
 end
 
 function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event)
-print(debug.traceback())
+--print(debug.traceback())
 print('clEnqueueNDRangeKernel', cmds, kernelHandle, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event)
 	local kernel = kernelsForID[kernelHandle[0].id]
 print('kernel', kernel.name)
@@ -1377,20 +1499,37 @@ print('program', program.libfile)
 	local args = table(kernel.args)
 	local argInfos = kernel.argInfos
 	for i=1,kernel.numargs do
+		local argInfo = assert(argInfos[i])
 		local arg = args[i]
+print('arg '..i)
+print('type(arg)', type(arg))
+print('ffi.typeof(arg)', ffi.typeof(arg))
+print('argInfo.origtype', argInfo.origtype)
+print('argInfo.type', argInfo.type)		
 		assert(type(arg) == 'cdata')
 		assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')
 		
-		local argInfo = argInfos[i]
-		if argInfo.isGlobal then	-- assert we have a cl_mem ... same with local?
+		if argInfo.isGlobal 
+		or argInfo.isConstant
+		then	-- assert we have a cl_mem ... same with local?
+print'isGlobal or isConstant'
+print('before cast', arg)			
 			arg = ffi.cast('cl_mem*', arg)
+print('after cast, arg', arg)
+print('after cast, arg[0]', arg[0])
+print('after cast, arg[0][0]', arg[0][0])
+print('after cast, arg[0][0].verify', arg[0][0].verify)
 			assert(arg[0][0].verify == cl_mem_verify)
-			args[i] = arg[0][0].ptr
+			arg = arg[0][0].ptr
 		elseif argInfo.isLocal then
+print'isLocal'			
 			-- use the pointer as-is
 		else
-			args[i] = ffi.cast(argInfo.type..'*', args[i])[0]
+print'neither local nor global (prim?)'			
+			arg = ffi.cast(argInfo.type..'*', arg)[0]
 		end
+print('arg value', arg)
+		args[i] = arg
 	end
 
 print('calling...')
@@ -1451,13 +1590,10 @@ cl.clGetEventInfo = makeGetter{
 	-- 1.0:
 	[ffi.C.CL_EVENT_COMMAND_QUEUE] = {
 		type = 'cl_command_queue',
-		get = function()
-			return 0
-		end,
+		value = 0,
 	},
 	[ffi.C.CL_EVENT_COMMAND_TYPE] = {
 		type = 'cl_command_type',
-		get = function()
 		--[[ one of:
 CL_COMMAND_NDRANGE_KERNEL
 CL_COMMAND_NATIVE_KERNEL
@@ -1489,18 +1625,14 @@ CL_COMMAND_SVM_MEMFILL
 CL_COMMAND_SVM_MAP
 CL_COMMAND_SVM_UNMAP
 			--]]
-			return 0
-		end,
+		value = 0,
 	},
 	[ffi.C.CL_EVENT_REFERENCE_COUNT] = {
 		type = 'cl_uint',
-		get = function()
-			return 0
-		end,
+		value = 0,
 	},
 	[ffi.C.CL_EVENT_COMMAND_EXECUTION_STATUS] = {
 		type = 'cl_int',
-		get = function()
 			--[[
 CL_QUEUED
 CL_SUBMITTED
@@ -1508,15 +1640,12 @@ CL_RUNNING
 CL_COMPLETE
 or error code
 			--]]
-			return ffi.C.CL_COMPLETE
-		end,
+		value = ffi.C.CL_COMPLETE,
 	},
 	-- 1.1
 	[ffi.C.CL_EVENT_CONTEXT] = {
 		type = 'cl_context',
-		get = function()
-			return 0	-- TODO give clcpu's contexts unique numbers
-		end,
+		value = 0,	-- TODO give clcpu's contexts unique numbers
 	},
 }
 
@@ -1525,24 +1654,24 @@ cl.clGetEventProfilingInfo = makeGetter{
 	-- 1.0
 	[ffi.C.CL_PROFILING_COMMAND_QUEUED] = {
 		type = 'cl_ulong',
-		get = function() return 0 end,
+		value = 0,
 	},
 	[ffi.C.CL_PROFILING_COMMAND_SUBMIT] = {
 		type = 'cl_ulong',
-		get = function() return 0 end,
+		value = 0,
 	},
 	[ffi.C.CL_PROFILING_COMMAND_START] = {
 		type = 'cl_ulong',
-		get = function() return 0 end,
+		value = 0,
 	},
 	[ffi.C.CL_PROFILING_COMMAND_END] = {
 		type = 'cl_ulong',
-		get = function() return 0 end,
+		value = 0,
 	},
 	-- 2.0
 	[ffi.C.CL_PROFILING_COMMAND_COMPLETE] = {
 		type = 'cl_ulong',
-		get = function() return 0 end,
+		value = 0,
 	},
 }
 
