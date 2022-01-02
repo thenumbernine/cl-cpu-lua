@@ -1608,12 +1608,13 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_off
 --print('program id', program.id)
 	local pid = program.id
 	local lib = program.lib
-	local args = table(kernel.args)
+	local srcargs = kernel.args
+	local dstargs = {}
 	local argInfos = kernel.argInfos
 	for i=1,kernel.numargs do
 		local argInfo = assert(argInfos[i])
-		local arg = args[i][1]
-		local size = args[i][2]
+		local arg = srcargs[i][1]
+		local size = srcargs[i][2]
 --print('arg '..i)
 --print('type(arg)', type(arg))
 --print('ffi.typeof(arg)', ffi.typeof(arg))
@@ -1637,13 +1638,18 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_off
 		elseif argInfo.isLocal then
 --print'isLocal'
 			-- use the pointer as-is
-			arg = ffi.new('uint8_t[?]', size)
+			local localptr = srcargs[i].localptr
+			if not localptr then
+				localptr = ffi.new('uint8_t[?]', size)
+				srcargs[i].localptr = localptr
+			end
+			arg = localptr
 		else
 --print'neither local nor global (prim?)'
 			arg = ffi.cast(argInfo.type..'*', arg)[0]
 		end
 --print('arg value', arg)
-		args[i] = arg
+		dstargs[i] = arg
 	end
 
 --print('calling...')
@@ -1685,7 +1691,7 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_off
 					lib[global_id_fields[n]] = is[n] + global_work_offset_v[n]
 				end
 --io.write('('..table.concat(is, ', ')..') ')
-				kernel.func(table.unpack(args, 1, kernel.numargs))
+				kernel.func(table.unpack(dstargs, 1, kernel.numargs))
 			end
 		end
 	end
