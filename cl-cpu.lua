@@ -4,6 +4,11 @@ local io = require 'ext.io'
 local string = require 'ext.string'
 local template = require 'template'
 
+require 'ffi.c.stdlib'	-- rand()
+
+-- whether to verify each pointer passed into a function was an object we created
+local extraStrictVerification = true
+
 -- copied from ffi/OpenCL.lua
 ffi.cdef[[
 enum {
@@ -168,6 +173,8 @@ enum {
   CL_QUEUE_DEVICE                              = 0x1091,
   CL_QUEUE_REFERENCE_COUNT                     = 0x1092,
   CL_QUEUE_PROPERTIES                          = 0x1093,
+  CL_QUEUE_SIZE                                = 0x1094,
+  CL_QUEUE_DEVICE_DEFAULT                      = 0x1095,
   CL_MEM_READ_WRITE                            = 0x01,
   CL_MEM_WRITE_ONLY                            = 0x02,
   CL_MEM_READ_ONLY                             = 0x04,
@@ -526,24 +533,42 @@ enum {
 };
 
 // specific for this CPU implementation
-struct _cl_platform_id { int id; };
-struct _cl_device_id { int id; };
-struct _cl_context { int id; };
-struct _cl_command_queue { int id; };
-struct _cl_event { int id; };
-
+struct _cl_platform_id {
+	int verify;
+};
+struct _cl_device_id {
+	int verify;
+};
+struct _cl_context {
+	int verify;
+};
 struct _cl_mem {
-	size_t verify;
+	int verify;
 	size_t size;
+	cl_mem_flags flags;
 	uint8_t* ptr;
+	uint8_t* hostPtr;
+	cl_context ctx;
+};
+struct _cl_command_queue {
+	int verify;
+	cl_context ctx;
+	cl_device_id device;
+	cl_command_queue_properties properties;
+};
+struct _cl_event {
+	int verify;
+	int id;
 };
 
 struct _cl_program {
-	int id;	//unique id, used to lookup program libs
+	int verify;
+	int id;				//unique id, lookup into programsForID lua table
 };
 
 struct _cl_kernel {
-	int id;
+	int verify;
+	int id;				//unique id, lookup into kernelsForID lua table
 };
 
 ]]
@@ -557,8 +582,21 @@ local cl = {}
 -- size_t* sizePtr
 local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 --print(debug.traceback())
-	if args.idtype then id = ffi.cast(args.idtype, id) end
-	name = tonumber(ffi.cast('cl_uint', name))
+	if args.idcast then
+		local err
+		id, err = args.idcast(id)
+		if err then return err end
+	end
+
+	-- correct type or not, better key it as a lua number,
+	-- because keying it as a luajit ffi int will treat it like an object -- then only the identical object in memory will reference the value
+	-- likewise I'm keying the args with ffi.C.*** which is a C enum, and luajit will evaluate those as Lua numbers.
+	if args.infotype then
+		name = tonumber(ffi.cast(args.infotype, name))
+	else
+		name = tonumber(ffi.cast('cl_uint', name))
+	end
+	
 	paramSize = ffi.cast('size_t', paramSize)
 	resultPtr = ffi.cast('void*', resultPtr)
 	sizePtr = ffi.cast('size_t*', sizePtr)
@@ -620,7 +658,7 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 			ffi.copy(resultPtr, strValue)
 		end
 	elseif var.getArray then
-		return var.getArray(paramSize, resultPtr, sizePtr, id, ...) or cl.CL_SUCCESS
+		return var.getArray(paramSize, resultPtr, sizePtr, id, ...) or ffi.C.CL_SUCCESS
 	else
 		-- single-value POD results:
 		if sizePtr ~= nil then
@@ -649,11 +687,35 @@ local function makeGetter(args)
 end
 
 
-
 -- PLATFORM
+
+
+local cl_platform_id_verify = ffi.cast('int', ffi.C.rand())
+
+local allPlatforms = table{
+	-- allocate a single-array so I can cast it as a pointer
+	-- because it's an array-of-struct, I have to use {{ }} in the initializer
+	ffi.new('struct _cl_platform_id[1]', {{
+		verify = cl_platform_id_verify,
+	}})
+}
+assert(allPlatforms[1][0].verify == cl_platform_id_verify)
+
+local function platformCastAndVerify(platform)
+	platform = ffi.cast('struct _cl_platform_id*', platform)
+	if platform == nil
+	or platform[0].verify ~= cl_platform_id_verify
+	or platform ~= ffi.cast('struct _cl_platform_id*', allPlatforms[1])
+	then
+		return nil, ffi.C.CL_INVALID_PLATFORM
+	end
+	return platform
+end
 
 cl.clGetPlatformInfo = makeGetter{
 	name = 'clGetPlatformInfo',
+	infotype = 'cl_platform_info',
+	idcast = platformCastAndVerify,
 	[ffi.C.CL_PLATFORM_PROFILE] = 'FULL_PROFILE',
 	[ffi.C.CL_PLATFORM_VERSION] = 'OpenCL 1.1',
 	[ffi.C.CL_PLATFORM_NAME] = 'CPU debug implementation',
@@ -665,37 +727,62 @@ cl.clGetPlatformInfo = makeGetter{
 	},
 }
 
-local allPlatforms = table{
-	ffi.new('struct _cl_platform_id', {id=0})
-}
-
-function cl.clGetPlatformIDs(count, platformIDs, countPtr)
+function cl.clGetPlatformIDs(count, platforms, countPtr)
+	
 	count = ffi.cast('cl_uint', count)
-	platformIDs = ffi.cast('cl_platform_id*', platformIDs)
+	platforms = ffi.cast('cl_platform_id*', platforms)
 	countPtr = ffi.cast('cl_uint*', countPtr)
-	if count == 0 and platformIDs ~= nil then
+	
+	if count == 0 and platforms ~= nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
-	if platformIDs == nil and countPtr == nil then
+	if platforms == nil and countPtr == nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
 	if countPtr ~= nil then
 		countPtr[0] = 1
 	end
-	if platformIDs ~= nil and count >= 1 then
-		platformIDs[0] = allPlatforms[1]
+	
+	if platforms ~= nil and count >= 1 then
+		platforms[0] = ffi.cast('struct _cl_platform_id*', allPlatforms[1])
 	end
+	
 	return ffi.C.CL_SUCCESS
 end
 
 
 -- DEVICE
 
+
+local clDeviceMaxMemAllocSize = 5461822664
+
+local cl_device_id_verify = ffi.cast('int', ffi.C.rand())
+
+local allDevices = table{
+	ffi.new('struct _cl_device_id[1]', {{
+		verify = cl_device_id_verify,
+	}})
+}
+assert(allDevices[1][0].verify == cl_device_id_verify)
+
+local function deviceCastAndVerify(device)
+	device = ffi.cast('struct _cl_device_id*', device)
+	if device == nil
+	or device[0].verify ~= cl_device_id_verify
+	or device ~= ffi.cast('struct _cl_device_id*', allDevices[1])
+	then
+		return nil, ffi.C.CL_INVALID_DEVICE
+	end
+	return device
+end
+
 function cl.clRetainDevice(device) end
 function cl.clReleaseDevice(device) end
 
 cl.clGetDeviceInfo = makeGetter{
 	name = 'clGetDeviceInfo',
+	infotype = 'cl_device_info',
+	idcast = deviceCastAndVerify,
 	[ffi.C.CL_DEVICE_TYPE] = {
 		type = 'cl_device_type',
 		value = ffi.C.CL_DEVICE_TYPE_CPU,
@@ -733,6 +820,10 @@ cl.clGetDeviceInfo = makeGetter{
 			end
 		end,
 	},
+	[ffi.C.CL_DEVICE_MAX_MEM_ALLOC_SIZE] = {
+		type = 'cl_ulong',
+		value = clDeviceMaxMemAllocSize,
+	},
 	[ffi.C.CL_DEVICE_NAME] = 'CPU debug implementation',
 	[ffi.C.CL_DEVICE_VENDOR] = 'Christopher Moore',
 	[ffi.C.CL_DEVICE_PROFILE] = 'FULL_PROFILE',
@@ -757,19 +848,21 @@ cl.clGetDeviceInfo = makeGetter{
 	[ffi.C.CL_DEVICE_BUILT_IN_KERNELS] = '',
 }
 
-local allDevices = table{
-	ffi.new('struct _cl_device_id[1]', {id = 0})
-}
-
-function cl.clGetDeviceIDs(platformID, deviceType, count, deviceIDs, countPtr)
-	platformID = ffi.cast('cl_platform_id', platformID)
+function cl.clGetDeviceIDs(platform, deviceType, count, devices, countPtr)
+	--platform = ffi.cast('cl_platform_id', platform)
 	deviceType = ffi.cast('cl_device_type', deviceType)
 	count = ffi.cast('cl_uint', count)
-	deviceIDs = ffi.cast('cl_device_id*', deviceIDs)
+	devices = ffi.cast('cl_device_id*', devices)
 	countPtr = ffi.cast('cl_uint*', countPtr)
-	-- if platformID isn't valid then return CL_INVALID_PLATFORM end
+
+	local platform, err = platformCastAndVerify(platform)
+	if err then return err end
+	
 	-- if deviceType isn't valid then return CL_INVALID_DEVICE_TYPE end
-	if count == 0 and deviceIDs ~= nil then return ffi.C.CL_INVALID_VALUE end
+	if count == 0 and devices ~= nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	
 	-- should I only return success when querying cpus?
 	--if bit.band(deviceType, bit.bor(ffi.C.CL_DEVICE_TYPE_CPU, ffi.C.CL_DEVICE_TYPE_DEFAULT)) ~= 0 then
 	-- or just always?
@@ -777,8 +870,8 @@ function cl.clGetDeviceIDs(platformID, deviceType, count, deviceIDs, countPtr)
 		if countPtr ~= nil then
 			countPtr[0] = 1
 		end
-		if deviceIDs ~= nil and count >= 1 then
-			deviceIDs[0] = allDevices[1]
+		if devices ~= nil and count >= 1 then
+			devices[0] = allDevices[1]
 		end
 	else
 		return ffi.C.CL_DEVICE_NOT_FOUND
@@ -786,13 +879,38 @@ function cl.clGetDeviceIDs(platformID, deviceType, count, deviceIDs, countPtr)
 	return ffi.C.CL_SUCCESS
 end
 
+
 -- CONTEXT
+
+
+local cl_context_verify = ffi.C.rand()
+
+-- TODO multiple contexts? any need yet?
+local allContexts = table{
+	ffi.new('struct _cl_context[1]', {{
+		verify = cl_context_verify,
+	}}),
+}
+assert(allContexts[1][0].verify == cl_context_verify)
+
+local function contextCastAndVerify(ctx)
+	ctx = ffi.cast('struct _cl_context*', ctx)
+	if ctx == nil
+	or ctx[0].verify ~= cl_context_verify
+	or ctx ~= ffi.cast('struct _cl_context*', allContexts[1])
+	then
+		return nil, ffi.C.CL_INVALID_CONTEXT
+	end
+	return ctx
+end
 
 function cl.clRetainContext(ctx) end
 function cl.clReleaseContext(ctx) end
 
 cl.clGetContextInfo = makeGetter{
 	name = 'clGetContextInfo',
+	infotype = 'cl_context_info',
+	idcast = contextCastAndVerify,
 	--[ffi.C.CL_CONTEXT_REFERENCE_COUNT] = ...,
 	[ffi.C.CL_CONTEXT_NUM_DEVICES] = {
 		type = 'cl_uint',
@@ -823,17 +941,24 @@ cl.clGetContextInfo = makeGetter{
 	},
 }
 
--- TODO multiple contexts? any need yet?
-local allContexts = table{
-	ffi.new('struct _cl_context[1]', {id = 0}),
-}
-
-function cl.clCreateContext(properties, numDevices, deviceIDs, notify, x, errPtr)
+function cl.clCreateContext(properties, numDevices, devices, notify, userData, errPtr)
 	properties = ffi.cast('cl_context_properties*', properties)
 	numDevices = ffi.cast('cl_uint', numDevices)
-	deviceIDs = ffi.cast('cl_device_id*', deviceIDs)
+	devices = ffi.cast('cl_device_id*', devices)
+	-- if 'properties' is invalid, or if 'properties' is null and no platform could be selected, then return CL_INVALID_PLATFORM
+	-- if any value in 'properties' is not a valid name then return CL_INVALID_VALUE
+	for i=0,tonumber(numDevices)-1 do
+		local device, err = deviceCastAndVerify(devices[i])
+		if err then
+			if errPtr ~= nil then
+				errPtr[0] = ffi.C.CL_SUCCESS
+			end
+			return ffi.cast('cl_context', nil)
+		end
+		-- if the device isn't available then return CL_DEVICE_NOT_AVAILABLE
+	end
 	-- notify is a callback ...
-	-- x is userdata for the notify()
+	-- userData is userdata for the notify()
 	errPtr = ffi.cast('cl_int*', errPtr)
 	if errPtr ~= nil then
 		errPtr[0] = ffi.C.CL_SUCCESS
@@ -842,30 +967,106 @@ function cl.clCreateContext(properties, numDevices, deviceIDs, notify, x, errPtr
 	return ctx
 end
 
+
 -- MEMORY OBJECT
-
-function cl.clRetainMemObject(mem) end
-function cl.clReleaseMemObject(mem) end
-
-function cl.clGetMemObjectInfo(mem, name, size, valuePtr, sizePtr)
---print('clGetMemObjectInfo', mem, name, size, valuePtr, sizePtr)
-	return ffi.C.CL_SUCCESS
-end
-
--- IMAGE
-
-function cl.clGetImageInfo(mem, name, size, valuePtr, sizePtr)
---print('clGetImageInfo', mem, name, size, valuePtr, sizePtr)
-	return ffi.C.CL_SUCCESS
-end
-
--- BUFFER
 
 
 local allMems = table()
 local allPtrs = table()	-- because I don't trust luajit to not gc a ptr I ffi.new'd
 
-local cl_mem_verify = ffi.new('size_t', 0xdeadbeefdeadbeef)
+local cl_mem_verify = ffi.C.rand()
+
+-- casts and returns it as a cl_mem i.e. struct _cl_mem*
+-- if it has any problems then returns false, ffi.C.CL_INVALID_MEM_OBJECT
+local function memCastAndVerify(mem)
+	mem = ffi.cast('struct _cl_mem*', mem)
+	if mem == nil
+	or mem[0].verify ~= cl_mem_verify
+	then
+		return nil, ffi.C.CL_INVALID_MEM_OBJECT
+	end
+	if extraStrictVerification then
+		local i
+		for j,omem in ipairs(allMems) do
+			if ffi.cast('struct _cl_mem*', omem) == mem then
+				i = j
+				break
+			end
+		end
+		if not i then
+			return nil, ffi.C.CL_INVALID_MEM_OBJECT
+		end
+		assert(#allPtrs == #allMems)
+		if allPtrs[i] ~= mem[0].ptr then
+			print("mem", mem)
+			print("matches allMems["..i.."]")
+			print("mem[0].ptr", mem[0].ptr)
+			print("allMems["..i.."][0].ptr", allMems[i][0].ptr)
+			print("allPtrs["..i.."]", allPtrs[i])
+			error'here'
+		end
+	end
+	return mem
+end
+
+function cl.clRetainMemObject(mem) end
+function cl.clReleaseMemObject(mem) end
+
+cl.clGetMemObjectInfo = makeGetter{
+	name = 'clGetMemObjectInfo',
+	infotype = 'cl_mem_info',
+	idcast = memCastAndVerify,
+	--[[
+	TODO add support for CL_MEM_OBJECT_IMAGE2D, CL_MEM_OBJECT_IMAGE3D via clCreateImage2D / clCreateImage3D
+	--]]
+	[ffi.C.CL_MEM_TYPE] = {
+		type = 'cl_mem_object_type',
+		value = ffi.C.CL_MEM_OBJECT_BUFFER,
+	},
+	[ffi.C.CL_MEM_FLAGS] = {
+		type = 'cl_mem_flags',
+		get = function(mem)
+			return mem[0].flags
+		end,
+	},
+	[ffi.C.CL_MEM_SIZE] = {
+		type = 'size_t',
+		get = function(mem)
+			return mem[0].size
+		end,
+	},
+	[ffi.C.CL_MEM_HOST_PTR] = {
+		type = 'void*',
+		get = function(mem)
+			return mem[0].hostPtr
+		end,
+	},
+	[ffi.C.CL_MEM_MAP_COUNT] = {
+		type = 'cl_uint',
+		value = 0,	-- "considered immediately stale, used for debugging"
+	},
+	-- CL_MEM_REFERENCE_COUNT cl_uint
+	[ffi.C.CL_MEM_CONTEXT] = {
+		type = 'cl_context',
+		get = function(mem)
+			return mem[0].ctx
+		end,
+	},
+}
+
+
+-- IMAGE
+
+
+cl.clGetImageInfo = makeGetter{
+	name = 'clGetImageInfo',
+	infotype = 'cl_image_info',
+	-- and no keys so it should always fail
+}
+
+
+-- BUFFER
+
 
 --[[
 returns cl_mem
@@ -873,21 +1074,44 @@ which I have typecast to a _cl_mem*
 and so in luajit I'm returning a _cl_mem[1]
 so that it will act like a _cl_mem*
 --]]
-function cl.clCreateBuffer(ctxID, flags, size, hostPtr, errPtr)
-	ctxID = ffi.cast('cl_context', ctxID)
+function cl.clCreateBuffer(ctx, flags, size, hostPtr, errPtr)
+	--ctx = ffi.cast('cl_context', ctx)
 	flags = ffi.cast('cl_mem_flags', flags)
 	size = ffi.cast('size_t', size)
 	hostPtr = ffi.cast('void*', hostPtr)
 	errPtr = ffi.cast('cl_int*', errPtr)
---print('clCreateBuffer', ctxID, flags, size, hostPtr, errPtr)
+--print('clCreateBuffer', ctx, flags, size, hostPtr, errPtr)
+
+	local ctx, err = contextCastAndVerify(ctx)
+	if err then
+		if errPtr ~= nil then
+			errPtr[0] = err
+		end
+		return ffi.cast('cl_mem', nil)
+	end
 	
-	if size == 0 then
+	if bit.band(flags, bit.bnot(bit.bor(
+		ffi.C.CL_MEM_READ_WRITE,
+		ffi.C.CL_MEM_WRITE_ONLY,
+		ffi.C.CL_MEM_READ_ONLY,
+		ffi.C.CL_MEM_USE_HOST_PTR,
+		ffi.C.CL_MEM_ALLOC_HOST_PTR,
+		ffi.C.CL_MEM_COPY_HOST_PTR
+	))) ~= 0 then
+		if errPtr ~= nil then
+			errPtr[0] = ffi.C.CL_INVALID_VALUE
+		end
+		return ffi.cast('cl_mem', nil)
+	end
+	
+	if size == 0
+	or size > clDeviceMaxMemAllocSize
+	then
 		if errPtr ~= nil then
 			errPtr[0] = ffi.C.CL_INVALID_BUFFER_SIZE
 		end
-		return
+		return ffi.cast('cl_mem', nil)
 	end
-	-- TODO if size > CL_DEVICE_MAX_MEM_ALLOC_SIZE then return CL_INVALID_BUFFER_SIZE
 
 	local reqHost = bit.band(flags, bit.bor(ffi.C.CL_MEM_USE_HOST_PTR, ffi.C.CL_MEM_COPY_HOST_PTR)) ~= 0
 	if (reqHost and hostPtr == nil)
@@ -896,7 +1120,7 @@ function cl.clCreateBuffer(ctxID, flags, size, hostPtr, errPtr)
 		if errPtr ~= nil then
 			errPtr[0] = ffi.C.CL_INVALID_HOST_PTR
 		end
-		return
+		return ffi.cast('cl_mem', nil)
 	end
 
 	local mem = ffi.new'struct _cl_mem[1]'
@@ -908,8 +1132,11 @@ function cl.clCreateBuffer(ctxID, flags, size, hostPtr, errPtr)
 --print('ptr', ptr)
 --print('size', size)
 	mem[0].verify = cl_mem_verify
-	mem[0].ptr = ptr
 	mem[0].size = size
+	mem[0].flags = flags
+	mem[0].ptr = ptr
+	mem[0].hostPtr = hostPtr
+	mem[0].ctx = ctx
 	allMems:insert(mem)	-- don't let luajit gc it.  TODO refcount / retain / release to keep track of it that way
 	
 	if reqHost then ffi.copy(mem[0].ptr, hostPtr, size) end
@@ -920,20 +1147,113 @@ function cl.clCreateBuffer(ctxID, flags, size, hostPtr, errPtr)
 	return ffi.cast('cl_mem', mem)	-- return the ptr, not the obj, so ffi.sizeof says it's a ptr size, not the obj size (which is double)
 end
 
-local function handleEvents(numWaitListEvents, waitListEvents, event)
-	-- ignore the wait list, since luajit doesn't have multithreading and so all cl kernels are executed immediately
-	-- if an event is specified then ...
-	if event ~= nil then
-		-- event should be type cl_event*
-		event = ffi.cast('struct _cl_event *', event)
-		event[0].id = 0
+
+-- COMMAND QUEUE
+
+
+local cl_command_queue_verify = ffi.C.rand()
+
+local allCmds = table{
+	ffi.new('struct _cl_command_queue[1]', {{
+		verify = cl_command_queue_verify,
+	}}),
+}
+assert(allCmds[1][0].verify == cl_command_queue_verify)
+
+local function queueCastAndVerify(cmds)
+	cmds = ffi.cast('struct _cl_command_queue*', cmds)
+	if cmds == nil
+	or cmds[0].verify ~= cl_command_queue_verify
+	or cmds ~= ffi.cast('cl_command_queue', allCmds[1])
+	then
+		return nil, ffi.C.CL_INVALID_COMMAND_QUEUE
 	end
+	return cmds
 end
+
+function cl.clRetainCommandQueue(cmds) end
+function cl.clReleaseCommandQueue(cmds) end
+
+function cl.clCreateCommandQueue(ctx, device, properties, errPtr)
+	--ctx = ffi.cast('cl_context', ctx)
+	--device = ffi.cast('cl_device_id', device)
+	properties = ffi.cast('cl_command_queue_properties', properties)
+	errPtr = ffi.cast('cl_int*', errPtr)
+
+	local ctx, err = contextCastAndVerify(ctx)
+	if err then
+		if errPtr ~= nil then
+			errPtr[0] = err
+		end
+		return ffi.cast('cl_command_queue', nil)
+	end
+
+	local device, err = deviceCastAndVerify(device)
+	if err then
+		if errPtr ~= nil then
+			errPtr[0] = err
+		end
+		return ffi.cast('cl_command_queue', nil)
+	end
+
+	-- if the values in properties are invalid then return CL_INVALID_VALUE
+	-- if the values in properties are valid, but not supported by the device, return CL_INVALID_QUEUE_PROPERTIES
+
+	if errPtr ~= nil then
+		errPtr[0] = ffi.C.CL_SUCCESS
+	end
+	
+	local cmds = ffi.cast('cl_command_queue', allCmds[1])
+	cmds[0].ctx = ctx
+	cmds[0].device = device
+	cmds[0].properties = properties
+	return cmds
+end
+
+cl.clGetCommandQueueInfo = makeGetter{
+	name = 'clGetCommandQueueInfo',
+	infotype = 'cl_command_queue_info',
+	idcast = queueCastAndVerify,
+	[ffi.C.CL_QUEUE_CONTEXT] = {
+		type = 'cl_context',
+		get = function(cmds)
+			return cmds[0].ctx
+		end,
+	},
+	[ffi.C.CL_QUEUE_DEVICE] = {
+		type = 'cl_device_id',
+		get = function(cmds)
+			return cmds[0].device
+		end,
+	},
+	-- ffi.C.CL_QUEUE_REFERENCE_COUNT = cl_uint
+	[ffi.C.CL_QUEUE_PROPERTIES] = {
+		type = 'cl_command_queue_properties',
+		get = function(cmds)
+			return cmds[0].properties
+		end,
+	},
+	-- 2.0
+	[ffi.C.CL_QUEUE_SIZE] = {
+		type = 'cl_uint',
+		value = 0,	-- always execute immediately such that all queues always are empty
+	},
+	-- 2.1
+	-- return the default command queue for the underlying device (the device of the command queue?)
+	[ffi.C.CL_QUEUE_DEVICE_DEFAULT] = {
+		type = 'cl_command_queue',
+		get = function(cmds)
+			return cmds
+		end,
+	},
+}
+
+local handleEvents
 
 function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
 --print(debug.traceback())
-	cmds = ffi.cast('cl_command_queue', cmds)
-	buffer = ffi.cast('cl_mem', buffer)
+	--cmds = ffi.cast('cl_command_queue', cmds)
+	--buffer = ffi.cast('cl_mem', buffer)
 	block = ffi.cast('cl_bool', block)
 	offset = ffi.cast('size_t', offset)
 	size = ffi.cast('size_t', size)
@@ -942,15 +1262,39 @@ function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWait
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
 --print('clEnqueueWriteBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+
+	local cmds, err = queueCastAndVerify(cmds)
+	if err then return err end
+
+	if numWaitListEvents > 0 and waitListEvents == nil then
+		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
+	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
+	
+	if ptr == nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	local buffer, err = memCastAndVerify(buffer)
+	if err then return err end
+	
+	if buffer[0].ptr == nil then
+		return ffi.C.CL_INVALID_MEM_OBJECT
+	end
+
+	if offset + size > buffer[0].size then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	
 	ffi.copy(buffer[0].ptr + offset, ptr, size)
+	
 	return ffi.C.CL_SUCCESS
 end
 
 function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
 --print(debug.traceback())
-	cmds = ffi.cast('cl_command_queue', cmds)
-	buffer = ffi.cast('cl_mem', buffer)
+	--cmds = ffi.cast('cl_command_queue', cmds)
+	--buffer = ffi.cast('cl_mem', buffer)
 	block = ffi.cast('cl_bool', block)
 	offset = ffi.cast('size_t', offset)
 	size = ffi.cast('size_t', size)
@@ -959,17 +1303,40 @@ function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitL
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
 --print('clEnqueueReadBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+	
+	local cmds, err = queueCastAndVerify(cmds)
+	if err then return err end
+
+	if numWaitListEvents > 0 and waitListEvents == nil then
+		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
+	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
+	
+	if ptr == nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	local buffer, err = memCastAndVerify(buffer)
+	if err then return err end
+	
+	if buffer[0].ptr == nil then
+		return ffi.C.CL_INVALID_MEM_OBJECT
+	end
+	
+	if offset + size > buffer[0].size then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	
 	ffi.copy(ptr, buffer[0].ptr + offset, size)
+	
 	return ffi.C.CL_SUCCESS
 end
 
 local int0 = ffi.new('int[1]', 0)
 function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
 --print(debug.traceback())
-	cmds = ffi.cast('cl_command_queue', cmds)
-	buffer = ffi.cast('cl_mem', buffer)
---print('clEnqueueFillBuffer', cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
+	--cmds = ffi.cast('cl_command_queue', cmds)
+	--buffer = ffi.cast('cl_mem', buffer)
 	pattern = ffi.cast('uint8_t*', pattern)	-- signature says void* but it will end up uint8_t eventually
 	patternSize = ffi.cast('size_t', patternSize)
 	offset = ffi.cast('size_t', offset)
@@ -981,8 +1348,22 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 --print('buffer size', buffer[0].size)
 --print('buffer ptr', buffer[0].ptr)
 --print('ffi sizeof buffer ptr', ffi.sizeof(buffer[0].ptr))
+
+	local cmds, err = queueCastAndVerify(cmds)
+	if err then return err end
+
+	if numWaitListEvents > 0 and waitListEvents == nil then
+		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
+	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
 	
+	local buffer, err = memCastAndVerify(buffer)
+	if err then return err end
+	
+	if buffer[0].ptr == nil then
+		return ffi.C.CL_INVALID_MEM_OBJECT
+	end
+
 	if pattern == nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
@@ -1006,10 +1387,6 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 	
 	if offset + size > buffer[0].size then
 		return ffi.C.CL_INVALID_VALUE
-	end
-
-	if buffer[0].ptr == nil then
-		return ffi.C.CL_INVALID_MEM_OBJECT
 	end
 
 	local isZero = true
@@ -1036,22 +1413,42 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 	return ffi.C.CL_SUCCESS
 end
 
+
 -- PROGRAM
+
 
 -- c fails on arith ops for vector types
 local gcc = require 'ffi-c.c'
 -- c++ fails on field initialization
 --local gcc = require 'ffi-c.cpp'
 
--- global ... should make this context-based, but right now all the ctx stuff is c-structs ...
+local cl_program_verify = ffi.C.rand()
+
+-- global
+-- lua table
+-- 1-based
+-- ... should make this context-based, but right now all the ctx stuff is c-structs ...
 local programsForID = table()
 
-function cl.clRetainProgram(cmds) end
-function cl.clReleaseProgram(cmds) end
+local function programCastAndVerify(programHandle)
+	programHandle = ffi.cast('struct _cl_program*', programHandle)
+	if programHandle == nil
+	or programHandle[0].verify ~= cl_program_verify
+	or not programsForID[programHandle[0].id]
+	or programHandle ~= ffi.cast('cl_program', programsForID[programHandle[0].id].handle)
+	then
+		return nil, ffi.C.CL_INVALID_PROGRAM
+	end
+	return programHandle
+end
+
+function cl.clRetainProgram(programHandle) end
+function cl.clReleaseProgram(programHandle) end
 
 cl.clGetProgramInfo = makeGetter{
 	name = 'clGetProgramInfo',
-	idtype = 'cl_program',
+	infotype = 'cl_program_info',
+	idcast = programCastAndVerify,
 	[ffi.C.CL_PROGRAM_BINARY_SIZES] = {
 		type = 'size_t',	-- TODO this is really a size_t[]
 		get = function(programHandle)
@@ -1071,7 +1468,7 @@ cl.clGetProgramInfo = makeGetter{
 function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, resultPtr, sizePtr)
 	return handleGetter({
 		name = 'clGetProgramBuildInfo',
-		idtype = 'cl_program',
+		idcast = programCastAndVerify,
 		[ffi.C.CL_PROGRAM_BUILD_LOG] = {
 			type = 'char[]',
 			getString = function(programHandle, deviceHandle)
@@ -1085,23 +1482,29 @@ function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, result
 	}, programHandle, name, paramSize, resultPtr, sizePtr, device)
 end
 
-local allProgramHandles = table()
-
 function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, errPtr)
-	ctx = ffi.cast('cl_context', ctx)
+	--ctx = ffi.cast('cl_context', ctx)
 	numStrings = ffi.cast('cl_uint', numStrings)
 	stringsPtr = ffi.cast('char**', stringsPtr)
 	lengthsPtr = ffi.cast('size_t*', lengthsPtr)
 	errPtr = ffi.cast('cl_int*', errPtr)
+	
+	local ctx, err = contextCastAndVerify(ctx)
+	if err then
+		if errPtr ~= nil then
+			errPtr[0] = err
+		end
+		return ffi.cast('cl_program', nil)
+	end
+
 	-- I'm creating the program entry up front
 	-- so there can be dead programs in the table
 	-- but the tradeoff is that I can also now use the program unique ID in the program's code gen
 	local programHandle = ffi.new'struct _cl_program[1]'
 	local id = #programsForID+1
+	programHandle[0].verify = cl_program_verify
 	programHandle[0].id = id
 --print('adding program entry', id)
-	programsForID[id] = {id=id}
-	allProgramHandles[id] = programHandle
 	
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local code = table{
@@ -1246,23 +1649,30 @@ int4 int4_add(int4 a, int4 b) {
 		return 'i = int4_add(i,_int4('..inside..'))'
 	end)
 
-	programsForID[id].code = code
+	programsForID[id] = {
+		id = id,
+		handle = programHandle,
+		code = code,
+	}
 
 	if errPtr ~= nil then
 		errPtr[0] = ffi.C.CL_SUCCESS
 	end
-	return programHandle
+	return ffi.cast('cl_program', programHandle)
 end
 
 function cl.clCreateProgramWithBinary(ctx, numDevices, devices, lengths, binaries, binaryStatus, errcodeRets)
 	error("not yet implemented")
 end
 
-function cl.clBuildProgram(programHandle, numDevices, deviceIDs, options, notify, userData)
-	programHandle = ffi.cast('cl_program', programHandle)
+function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
+	--programHandle = ffi.cast('cl_program', programHandle)
 	numDevices = ffi.cast('cl_uint', numDevices)
-	deviceIDs = ffi.cast('cl_device_id*', deviceIDs)
+	devices = ffi.cast('cl_device_id*', devices)
 	options = ffi.cast('char*', options)
+
+	local programHandle, err = programCastAndVerify(programHandle)
+	if err then return err end
 
 	local err = ffi.C.CL_SUCCESS
 	local id = programHandle[0].id
@@ -1310,20 +1720,35 @@ size_t _program_<?=id?>_group_id_2;
 	return err
 end
 
+
 -- KERNEL
 
+local cl_kernel_verify = ffi.C.rand()
+
 local kernelsForID = table()
+
+local function kernelCastAndVerify(kernelHandle)
+	kernelHandle = ffi.cast('struct _cl_kernel*', kernelHandle)
+	if kernelHandle == nil
+	or kernelHandle[0].verify ~= cl_kernel_verify
+	or not kernelsForID[kernelHandle[0].id]
+	or kernelHandle ~= ffi.cast('cl_kernel', kernelsForID[kernelHandle[0].id].handle)
+	then
+		return nil, ffi.C.CL_INVALID_KERNEL
+	end
+	return kernelHandle
+end
 
 function cl.clRetainKernel(kernel) end
 function cl.clReleaseKernel(kernel) end
 
 cl.clGetKernelInfo = makeGetter{
 	name = 'clGetKernelInfo',
-	idtype = 'cl_kernel',
+	infotype = 'cl_kernel_info',
+	idcast = kernelCastAndVerify,
 	[ffi.C.CL_KERNEL_FUNCTION_NAME] = {
 		type = 'char[]',
 		get = function(kernelHandle)
-			kernelHandle = ffi.cast('cl_kernel', kernelHandle)
 			local kernel = kernelsForID[kernelHandle[0].id]
 			return kernel.name
 		end,
@@ -1331,7 +1756,6 @@ cl.clGetKernelInfo = makeGetter{
 	[ffi.C.CL_KERNEL_NUM_ARGS] = {
 		type = 'cl_uint',
 		get = function(kernelHandle)
-			kernelHandle = ffi.cast('cl_kernel', kernelHandle)
 			local kernel = kernelsForID[kernelHandle[0].id]
 			return kernel.numargs
 		end,
@@ -1339,13 +1763,13 @@ cl.clGetKernelInfo = makeGetter{
 	[ffi.C.CL_KERNEL_CONTEXT] = {
 		type = 'cl_context',
 		get = function(kernelHandle)
-			return allContexts[1] -- ptr or ref?
+			local kernel = kernelsForID[kernelHandle[0].id]
+			return kernel.ctx
 		end,
 	},
 	[ffi.C.CL_KERNEL_PROGRAM] = {
 		type = 'cl_program',
 		get = function(kernelHandle)
-			kernelHandle = ffi.cast('cl_kernel', kernelHandle)
 			local kernel = kernelsForID[kernelHandle[0].id]
 			return kernel.program	-- TODO not program, but programHandle, which is an id to the index of the program ...
 		end,
@@ -1388,14 +1812,22 @@ local function removeCommentsAndApplyContinuations(code)
 end
 
 
-
 function cl.clCreateKernel(programHandle, kernelName, errPtr)
 --print(debug.traceback())
-	programHandle = ffi.cast('cl_program', programHandle)
+	--programHandle = ffi.cast('cl_program', programHandle)
 	kernelName = ffi.cast('char*', kernelName)
 	kernelName = ffi.string(kernelName)
 	errPtr = ffi.cast('cl_int*', errPtr)
 --print('clCreateKernel', programHandle, kernelName, errPtr)
+	
+	local programHandle, err = programCastAndVerify(programHandle)
+	if err then
+		if errPtr ~= nil then
+			errPtr[0] = err
+		end
+		return ffi.cast('cl_kernel', nil)
+	end
+
 	local program = assert(programsForID[programHandle[0].id])
 
 	local code = removeCommentsAndApplyContinuations(program.code)
@@ -1477,8 +1909,8 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	local func = program.lib[kernelName]
 --print('func', func)
 
-	if errPtr ~= nil then errPtr[0] = ffi.C.CL_SUCCESS end
 	local kernelHandle = ffi.new'struct _cl_kernel[1]'
+	kernelHandle[0].verify = cl_kernel_verify
 	kernelHandle[0].id = #kernelsForID+1
 	kernelsForID[kernelHandle[0].id] = {
 		name = kernelName,
@@ -1491,23 +1923,30 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		isLocal = isLocal,
 		isConstant = isConstant,
 		handle = kernelHandle,		-- hold so luajit doesn't free
+		ctx = ctx,
 	}
 	
 --print('returning kernel handle', kernelHandle[0].id)
 
+	if errPtr ~= nil then
+		errPtr[0] = ffi.C.CL_SUCCESS
+	end
 	return kernelHandle
 end
 
 function cl.clSetKernelArg(kernelHandle, index, size, value)
-	kernelHandle = ffi.cast('cl_kernel', kernelHandle)
+	--kernelHandle = ffi.cast('cl_kernel', kernelHandle)
 	index = ffi.cast('cl_uint', index)
 	size = ffi.cast('size_t', size)
 	value = ffi.cast('void*', value)
-	
+
+	local kernelHandle, err = kernelCastAndVerify(kernelHandle)
+	if err then return err end
 	local kernel = kernelsForID[kernelHandle[0].id]
 	if not kernel then
 		return ffi.C.CL_INVALID_KERNEL
 	end
+	
 	if index >= kernel.numargs then
 		return ffi.C.CL_INVALID_ARG_INDEX
 	end
@@ -1529,10 +1968,13 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 	then
 		-- clSetKernelArg for globals uses cl_mem[1], which is _cl_mem*[1]
 		local verifyvalue = ffi.cast('cl_mem*', value)
-		if verifyvalue[0][0].verify ~= cl_mem_verify then
+		if verifyvalue == nil then
 			return ffi.C.CL_INVALID_MEM_OBJECT
 		end
-	
+		
+		local _, err = memCastAndVerify(verifyvalue[0])
+		if err then return err end
+
 		if size ~= ffi.sizeof'cl_mem' then	-- which is a ptr's size ...
 			return ffi.C.CL_INVALID_ARG_SIZE
 		end
@@ -1546,66 +1988,55 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 
 	-- mind you value is a void* by now.
 	-- if it's a global then it points to a struct _cl_mem
-	kernel.args[tonumber(index)+1] = {value, size}
+	kernel.args[tonumber(index)+1] = {ptr=value, size=size}
 	
 	return ffi.C.CL_SUCCESS
 end
 
-function cl.clGetKernelWorkGroupInfo(kernelID, deviceID, name, paramSize, resultPtr, sizePtr)
+function cl.clGetKernelWorkGroupInfo(kernelID, device, name, paramSize, resultPtr, sizePtr)
 	return handleGetter({
 		name = 'clGetKernelWorkGroupInfo',
-		idtype = 'cl_kernel',
+		infotype = 'cl_kernel_info',
+		idcast = kernelCastAndVerify,
 		[ffi.C.CL_KERNEL_WORK_GROUP_SIZE] = {
 			type = 'size_t',
 			value = 16,
 		},
-	}, kernelID, name, paramSize, resultPtr, sizePtr, deviceID)
+	}, kernelID, name, paramSize, resultPtr, sizePtr, device)
 end
 
--- COMMAND QUEUE
-
-local allCmds = table{
-	ffi.new('struct _cl_command_queue[1]', {id=0}),
-}
-
-function cl.clRetainCommandQueue(cmds) end
-function cl.clReleaseCommandQueue(cmds) end
-
-function cl.clCreateCommandQueue(ctx, device, properties, errPtr)
-	ctx = ffi.cast('cl_context', ctx)
-	device = ffi.cast('cl_device_id', device)
-	properties = ffi.cast('cl_command_queue_properties', properties)
-	errPtr = ffi.cast('cl_int*', errPtr)
-	if errPtr ~= nil then
-		errPtr[0] = ffi.C.CL_SUCCESS
-	end
-	local cmds = allCmds[1]
-	return cmds
-end
-
-function cl.clGetCommandQueueInfo(cmds, name, paramSize, param, paramSizePtr)
---print('clGetCommandQueueInfo', cmds, name, paramSize, param, paramSizePtr)
-	return ffi.C.CL_INVALID_VALUE
-end
-
-function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event)
+function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
 --print(debug.traceback())
-	cmds = ffi.cast('cl_command_queue', cmds)
-	kernelHandle = ffi.cast('cl_kernel', kernelHandle)
-	work_dim = ffi.cast('cl_uint', work_dim)
-	work_dim = tonumber(work_dim)
-	global_work_offset = ffi.cast('size_t*', global_work_offset)
-	global_work_size = ffi.cast('size_t*', global_work_size)
-	local_work_size = ffi.cast('size_t*', local_work_size)
-	num_events_in_wait_list = ffi.cast('cl_uint', num_events_in_wait_list)
-	event_wait_list = ffi.cast('cl_event*', event_wait_list)
+	--cmds = ffi.cast('cl_command_queue', cmds)
+	--kernelHandle = ffi.cast('cl_kernel', kernelHandle)
+	workDim = ffi.cast('cl_uint', workDim)
+	workDim = tonumber(workDim)
+	globalWorkOffset = ffi.cast('size_t*', globalWorkOffset)
+	globalWorkSize = ffi.cast('size_t*', globalWorkSize)
+	localWorkSize = ffi.cast('size_t*', localWorkSize)
+	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
+	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
---print('clEnqueueNDRangeKernel', cmds, kernelHandle, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event)
+--print('clEnqueueNDRangeKernel', cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
+	
+	local cmds, err = queueCastAndVerify(cmds)
+	if err then return err end
+
+	local kernelHandle, err = kernelCastAndVerify(kernelHandle)
+	if err then return err end
+
 	local kernel = kernelsForID[kernelHandle[0].id]
 --print('kernel', kernel.name)
+
+	if numWaitListEvents > 0 and waitListEvents == nil then
+		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
+	end
+	handleEvents(numWaitListEvents, waitListEvents, event)
+	
 	local program = kernel.program
 --print('program', program.libfile)
 --print('program id', program.id)
+	
 	local pid = program.id
 	local lib = program.lib
 	local srcargs = kernel.args
@@ -1613,8 +2044,8 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_off
 	local argInfos = kernel.argInfos
 	for i=1,kernel.numargs do
 		local argInfo = assert(argInfos[i])
-		local arg = srcargs[i][1]
-		local size = srcargs[i][2]
+		local arg = srcargs[i].ptr
+		local size = srcargs[i].size
 --print('arg '..i)
 --print('type(arg)', type(arg))
 --print('ffi.typeof(arg)', ffi.typeof(arg))
@@ -1629,11 +2060,17 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_off
 --print'isGlobal or isConstant'
 --print('before cast', arg)
 			arg = ffi.cast('cl_mem*', arg)
+			if arg == nil then
+				error'here'
+			end
+			local _, err = memCastAndVerify(arg[0])
+			if err then
+				error'here'
+			end
 --print('after cast, arg', arg)
 --print('after cast, arg[0]', arg[0])
 --print('after cast, arg[0][0]', arg[0][0])
 --print('after cast, arg[0][0].verify', arg[0][0].verify)
-			assert(arg[0][0].verify == cl_mem_verify)
 			arg = arg[0][0].ptr
 		elseif argInfo.isLocal then
 --print'isLocal'
@@ -1656,13 +2093,13 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, work_dim, global_work_off
 	local global_work_offset_v = {}
 	local global_work_size_v = {}
 	local local_work_size_v = {}
-	assert(work_dim >= 1 and work_dim <= 3)
-	for i=1,work_dim do
-		global_work_offset_v[i] = tonumber(global_work_offset[i-1])
-		global_work_size_v[i] = tonumber(global_work_size[i-1])
-		local_work_size_v[i] = tonumber(local_work_size[i-1])
+	assert(workDim >= 1 and workDim <= 3)
+	for i=1,workDim do
+		global_work_offset_v[i] = tonumber(globalWorkOffset[i-1])
+		global_work_size_v[i] = tonumber(globalWorkSize[i-1])
+		local_work_size_v[i] = tonumber(localWorkSize[i-1])
 	end
-	for i=work_dim+1,3 do
+	for i=workDim+1,3 do
 		global_work_offset_v[i] = 0
 		global_work_size_v[i] = 1
 		local_work_size_v[i] = 1
@@ -1701,7 +2138,41 @@ end
 
 function cl.clFinish() end
 
+
 -- EVENT
+
+local cl_event_verify = ffi.C.rand()
+
+local allEvents = table()
+
+local function eventCastAndVerify(event)
+	event = ffi.cast('struct _cl_event*', event)
+	if event == nil
+	or event[0].verify ~= cl_event_verify
+	--or event ~= ffi.cast('struct _cl_event*', allEvents[1])
+	then
+		return nil, ffi.C.CL_INVALID_EVENT
+	end
+	return event
+end
+
+function handleEvents(numWaitListEvents, waitListEvents, eventHandle)
+	-- ignore the wait list, since luajit doesn't have multithreading and so all cl kernels are executed immediately
+	-- if an event is specified then ...
+	if eventHandle ~= nil then
+		-- eventHandle should be type cl_event*
+		eventHandle = ffi.cast('cl_event*', eventHandle)
+	
+		local event = ffi.new'struct _cl_event[1]'
+
+		local id = #allEvents+1
+		allEvents[id] = event
+		event[0].verify = cl_event_verify
+		event[0].id = id
+	
+		eventHandle[0] = event
+	end
+end
 
 -- TODO refcount or something if you care, but I don't
 function cl.clRetainEvent(event) end
@@ -1709,7 +2180,8 @@ function cl.clReleaseEvent(event) end
 
 cl.clGetEventInfo = makeGetter{
 	name = 'clGetEventInfo',
-	idtype = 'cl_event',
+	infotype = 'cl_event_info',
+	idcast = eventCastAndVerify,
 	-- 1.0:
 	[ffi.C.CL_EVENT_COMMAND_QUEUE] = {
 		type = 'cl_command_queue',
@@ -1774,7 +2246,8 @@ or error code
 
 cl.clGetEventProfilingInfo = makeGetter{
 	name = 'clGetEventProfilingInfo',
-	idtype = 'cl_event',
+	infotype = 'cl_event_info',
+	idcast = eventCastAndVerify,
 	-- 1.0
 	[ffi.C.CL_PROFILING_COMMAND_QUEUED] = {
 		type = 'cl_ulong',
