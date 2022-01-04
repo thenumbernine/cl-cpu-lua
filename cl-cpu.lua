@@ -801,7 +801,8 @@ cl.clGetDeviceInfo = makeGetter{
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE] = {
 		type = 'size_t',
-		value = 16,
+		--value = 16,
+		value = 1,
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_SIZES] = {
 		type = 'size_t[]',
@@ -1592,9 +1593,9 @@ EXTERN size_t _program_<?=id?>_global_id_1 = 0;
 EXTERN size_t _program_<?=id?>_global_id_2 = 0;
 #define get_global_id(n)	_program_<?=id?>_global_id_##n
 
-EXTERN int _program_<?=id?>_global_size_0 = 0;
-EXTERN int _program_<?=id?>_global_size_1 = 0;
-EXTERN int _program_<?=id?>_global_size_2 = 0;
+EXTERN size_t _program_<?=id?>_global_size_0 = 0;
+EXTERN size_t _program_<?=id?>_global_size_1 = 0;
+EXTERN size_t _program_<?=id?>_global_size_2 = 0;
 #define get_global_size(n)	_program_<?=id?>_global_size_##n
 
 EXTERN size_t _program_<?=id?>_local_id_0 = 0;
@@ -1602,9 +1603,9 @@ EXTERN size_t _program_<?=id?>_local_id_1 = 0;
 EXTERN size_t _program_<?=id?>_local_id_2 = 0;
 #define get_local_id(n)	_program_<?=id?>_local_id_##n
 
-EXTERN int _program_<?=id?>_local_size_0 = 0;
-EXTERN int _program_<?=id?>_local_size_1 = 0;
-EXTERN int _program_<?=id?>_local_size_2 = 0;
+EXTERN size_t _program_<?=id?>_local_size_0 = 0;
+EXTERN size_t _program_<?=id?>_local_size_1 = 0;
+EXTERN size_t _program_<?=id?>_local_size_2 = 0;
 #define get_local_size(n)	_program_<?=id?>_local_size_##n
 
 EXTERN size_t _program_<?=id?>_group_id_0 = 0;
@@ -1690,17 +1691,17 @@ size_t _program_<?=id?>_global_id_0;
 size_t _program_<?=id?>_global_id_1;
 size_t _program_<?=id?>_global_id_2;
 
-int _program_<?=id?>_global_size_0;
-int _program_<?=id?>_global_size_1;
-int _program_<?=id?>_global_size_2;
+size_t _program_<?=id?>_global_size_0;
+size_t _program_<?=id?>_global_size_1;
+size_t _program_<?=id?>_global_size_2;
 
 size_t _program_<?=id?>_local_id_0;
 size_t _program_<?=id?>_local_id_1;
 size_t _program_<?=id?>_local_id_2;
 
-int _program_<?=id?>_local_size_0;
-int _program_<?=id?>_local_size_1;
-int _program_<?=id?>_local_size_2;
+size_t _program_<?=id?>_local_size_0;
+size_t _program_<?=id?>_local_size_1;
+size_t _program_<?=id?>_local_size_2;
 
 size_t _program_<?=id?>_group_id_0;
 size_t _program_<?=id?>_group_id_1;
@@ -2000,7 +2001,8 @@ function cl.clGetKernelWorkGroupInfo(kernelID, device, name, paramSize, resultPt
 		idcast = kernelCastAndVerify,
 		[ffi.C.CL_KERNEL_WORK_GROUP_SIZE] = {
 			type = 'size_t',
-			value = 16,
+			value = 1,
+			--value = 16,
 		},
 	}, kernelID, name, paramSize, resultPtr, sizePtr, device)
 end
