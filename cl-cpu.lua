@@ -755,6 +755,8 @@ end
 
 
 local clDeviceMaxMemAllocSize = 5461822664
+local clDeviceMaxWorkItemDimension = 3
+local clDeviceMaxWorkGroupSize = 1
 
 local cl_device_id_verify = ffi.cast('int', ffi.C.rand())
 
@@ -797,27 +799,26 @@ cl.clGetDeviceInfo = makeGetter{
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS] = {
 		type = 'cl_uint',
-		value = 3,
+		value = clDeviceMaxWorkItemDimension,
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE] = {
 		type = 'size_t',
-		--value = 16,
-		value = 1,
+		value = clDeviceMaxWorkGroupSize,
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_SIZES] = {
 		type = 'size_t[]',
 		-- TODO just use get() but when the type ends in [], instead handle mult ret?
 		getArray = function(paramSize, resultPtr, sizePtr)
 			if sizePtr ~= nil then
-				sizePtr[0] = ffi.sizeof'size_t' * 3	-- * CL_MAX_WORK_ITEM_DIMENSIONS
+				sizePtr[0] = ffi.sizeof'size_t' * clDeviceMaxWorkItemDimension
 			end
 			if resultPtr ~= nil then
-				if paramSize < ffi.sizeof'size_t' * 3 then
+				if paramSize < ffi.sizeof'size_t' * clDeviceMaxWorkItemDimension then
 					return ffi.C.CL_INVALID_VALUE
 				end
-				resultPtr[0] = 256
-				resultPtr[1] = 256
-				resultPtr[2] = 256
+				resultPtr[0] = 1
+				resultPtr[1] = 1
+				resultPtr[2] = 1
 			end
 		end,
 	},
@@ -1450,6 +1451,48 @@ cl.clGetProgramInfo = makeGetter{
 	name = 'clGetProgramInfo',
 	infotype = 'cl_program_info',
 	idcast = programCastAndVerify,
+	--[ffi.C.CL_PROGRAM_REFERENCE_COUNT] = { type = 'cl_uint'},
+	[ffi.C.CL_PROGRAM_CONTEXT] = {
+		type = 'cl_context',
+		get = function(programHandle)
+			local program = assert(programsForID[programHandle[0].id])
+			return program.ctx
+		end,
+	},
+	[ffi.C.CL_PROGRAM_NUM_DEVICES] = {
+		type = 'cl_uint',
+		get = function(programHandle)
+			local program = assert(programsForID[programHandle[0].id])
+			return program.numDevices
+		end,
+	},
+	[ffi.C.CL_PROGRAM_DEVICES] = {
+		type = 'cl_device_id[]',
+		getArray = function(paramSize, resultPtr, sizePtr, programHandle)
+			local program = assert(programsForID[programHandle[0].id])
+			if sizePtr ~= nil then
+				sizePtr[0] = ffi.sizeof'cl_device_id' * program.numDevices
+			end
+			if resultPtr ~= nil then
+				if paramSize < ffi.sizeof'cl_device_id' * program.numDevices then return ffi.C.CL_INVALID_VALUE end
+				for i=0,program.numDevices-1 do
+					resultPtr[i] = program.devices[i]
+				end
+			end
+		end,
+	},
+	[ffi.C.CL_PROGRAM_SOURCE] = {
+		type = 'char[]',
+		getString = function(programHandle)
+			local program = assert(programsForID[programHandle[0].id])
+			-- The source string returned is a concatenation of all source strings specified to clCreateProgramWithSource with a null terminator. The concatenation strips any nulls in the original source strings.
+			-- The actual number of characters that represents the program source code including the null terminator is returned in param_value_size_ret.
+			-- so you are supposed to strip nulls,
+			-- but include the nulls in the size?
+			-- Weird.
+			return program.code
+		end,
+	},
 	[ffi.C.CL_PROGRAM_BINARY_SIZES] = {
 		type = 'size_t',	-- TODO this is really a size_t[]
 		get = function(programHandle)
@@ -1464,15 +1507,40 @@ cl.clGetProgramInfo = makeGetter{
 			return program.libdata
 		end,
 	},
+	-- 1.2:
+	--[ffi.C.CL_PROGRAM_NUM_KERNELS] = size_t,
+	--[ffi.C.CL_PROGRAM_KERNEL_NAMES] = char[],
+	-- 2.1:
+	--[ffi.C.CL_PROGRAM_IL] = char[]
+	-- 2.2:
+	--[ffi.C.CL_PROGRAM_SCOPE_GLOBAL_CTORS_PRESENT] = cl_bool,
+	--[ffi.C.CL_PROGRAM_SCOPE_GLOBAL_DTORS_PRESENT] = cl_bool,
 }
 
 function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, resultPtr, sizePtr)
+	local device, err = deviceCastAndVerify(device)
+	if err then return err end
 	return handleGetter({
 		name = 'clGetProgramBuildInfo',
+		infotype = 'cl_program_build_info',
 		idcast = programCastAndVerify,
+		[ffi.C.CL_PROGRAM_BUILD_STATUS] = {
+			type = 'cl_build_status',
+			get = function(programHandle, device)
+				local program = assert(programsForID[programHandle[0].id])
+				return program.status
+			end,
+		},
+		[ffi.C.CL_PROGRAM_BUILD_OPTIONS] = {
+			type = 'char[]',
+			getString = function(programHandle, device)
+				local program = assert(programsForID[programHandle[0].id])
+				return program.options
+			end,
+		},
 		[ffi.C.CL_PROGRAM_BUILD_LOG] = {
 			type = 'char[]',
-			getString = function(programHandle, deviceHandle)
+			getString = function(programHandle, device)
 				local program = assert(programsForID[programHandle[0].id])
 				local log = table()
 				log:insert(program.compileLog)
@@ -1480,6 +1548,15 @@ function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, result
 				return log:concat'\n'
 			end,
 		},
+		-- 1.2:
+		--[ffi.C.CL_PROGRAM_BINARY_TYPE] = cl_program_binary_type
+		-- one of: 
+		-- CL_PROGRAM_BINARY_TYPE_NONE
+		-- CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT
+		-- CL_PROGRAM_BINARY_TYPE_LIBRARY
+		-- CL_PROGRAM_BINARY_TYPE_EXECUTABLE
+		-- 2.0:
+		--[ffi.C.CL_PROGRAM_BUILD_GLOBAL_VARIABLE_TOTAL_SIZE] = size_t
 	}, programHandle, name, paramSize, resultPtr, sizePtr, device)
 end
 
@@ -1654,6 +1731,9 @@ int4 int4_add(int4 a, int4 b) {
 		id = id,
 		handle = programHandle,
 		code = code,
+		ctx = ctx,
+		status = ffi.C.CL_BUILD_NONE,
+		kernels = {},		-- key = kernel name, value = kernelsForID object
 	}
 
 	if errPtr ~= nil then
@@ -1669,8 +1749,31 @@ end
 function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
 	--programHandle = ffi.cast('cl_program', programHandle)
 	numDevices = ffi.cast('cl_uint', numDevices)
+	numDevices = tonumber(numDevices)
+	
 	devices = ffi.cast('cl_device_id*', devices)
+	if (devices == nil and numDevices > 0)
+	or (devices ~= nil and numDevices == 0)
+	then 
+		return ffi.C.CL_INVALID_VALUE
+	end
+	-- make a local copy so program can hold onto it
+	local newDevices = ffi.new('cl_device_id[?]', numDevices)
+	for i=0,numDevices-1 do
+		local device, err = deviceCastAndVerify(devices[i])
+		if err then return err end
+		-- TODO if device is still building a program then return CL_INVALID_OPERATION
+		newDevices[i] = device
+	end
+	devices = newDevices
+
 	options = ffi.cast('char*', options)
+	if options ~= nil then
+		options = ffi.string(options)
+	else
+		options = nil
+	end
+	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
 
 	local programHandle, err = programCastAndVerify(programHandle)
 	if err then return err end
@@ -1679,6 +1782,32 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	local id = programHandle[0].id
 --print('compiling program entry', id)
 	local program = programsForID[id]
+
+	if notify == nil and userData ~= nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	-- if there are kernels attached to the program...
+	if next(program.kernels) ~= nil then
+		return ffi.C.CL_INVALID_OPERATION
+	end
+
+	-- TODO if program was built with binary and devices listed in device_list do not have a valid program binary loaded then return bL_INVALID_BINARY
+	-- TODO CL_COMPILER_NOT_AVAILABLE
+
+	-- TODO CL_INVALID_OPERATION if program was not created with clCreateProgramWithSource, clCreateProgramWithIL or clCreateProgramWithBinary
+
+	-- clear results of a previous build?
+	program.lib = nil
+	program.libfile = nil
+	program.libdata = nil
+	program.compileLog = nil
+	program.linkLog = nil
+	program.numDevices = nil
+	program.devices = nil
+	program.status = ffi.C.CL_BUILD_IN_PROGRESS
+	program.options = nil
+
 	xpcall(function()
 		local result = gcc:compile(program.code)
 		if result.error then error(result.error) end
@@ -1707,22 +1836,37 @@ size_t _program_<?=id?>_group_id_0;
 size_t _program_<?=id?>_group_id_1;
 size_t _program_<?=id?>_group_id_2;
 ]], {id=id}))
-		
-		program.lib = result.lib
-		program.libfile = result.libfile
-		program.libdata = assert(io.readfile(result.libfile), "couldn't open file "..result.libfile)
-		program.compileLog = result.compileLog
-		program.linkLog = result.linkLog
+
+		-- assign to locals first so if any errors occur in reading fields, program will still be clean
+		local lib = result.lib
+		local libfile = result.libfile
+		local libdata = assert(io.readfile(result.libfile), "couldn't open file "..result.libfile)
+		local compileLog = result.compileLog
+		local linkLog = result.linkLog
+			
+		program.lib = lib
+		program.libfile = libfile
+		program.libdata = libdata
+		program.compileLog = compileLog
+		program.linkLog = linkLog
+		program.numDevices = numDevices
+		program.devices = programDevices
+		program.status = ffi.C.CL_BUILD_SUCCESS
+		program.options = options
+
 	end, function(err)
 --print('error while compiling: '..err)
 --print(debug.traceback())
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
+		program.status = ffi.C.CL_BUILD_ERROR
 	end)
 	return err
 end
 
 
 -- KERNEL
+
+local clKernelWorkGroupSize = 1
 
 local cl_kernel_verify = ffi.C.rand()
 
@@ -1837,6 +1981,8 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	
 	-- TODO how to get the signature?
 	-- search for it in the code maybe?
+	-- TODO do this upon clBuildProgram instead of at clCreateKernel
+	-- so that I can count the kernels and let clGetProgramInfo query them
 
 	local sig = code:match('kernel%s+void%s+'..kernelName..'%s*%([^)]*%)')
 --print('found with signature:\n'..sig:gsub('%s+', ' '))
@@ -1913,7 +2059,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	local kernelHandle = ffi.new'struct _cl_kernel[1]'
 	kernelHandle[0].verify = cl_kernel_verify
 	kernelHandle[0].id = #kernelsForID+1
-	kernelsForID[kernelHandle[0].id] = {
+	local kernel = {
 		name = kernelName,
 		program = program,
 		func = func,
@@ -1924,9 +2070,13 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		isLocal = isLocal,
 		isConstant = isConstant,
 		handle = kernelHandle,		-- hold so luajit doesn't free
-		ctx = ctx,
+		ctx = program.ctx,
 	}
+	kernelsForID[kernelHandle[0].id] = kernel
 	
+	-- TODO what if the kernel was already requested?
+	program.kernels[kernelName] = kernel
+
 --print('returning kernel handle', kernelHandle[0].id)
 
 	if errPtr ~= nil then
@@ -2001,41 +2151,86 @@ function cl.clGetKernelWorkGroupInfo(kernelID, device, name, paramSize, resultPt
 		idcast = kernelCastAndVerify,
 		[ffi.C.CL_KERNEL_WORK_GROUP_SIZE] = {
 			type = 'size_t',
-			value = 1,
-			--value = 16,
+			value = clKernelWorkGroupSize,
 		},
 	}, kernelID, name, paramSize, resultPtr, sizePtr, device)
 end
 
+local defaultGlobalWorkOffset = ffi.new('size_t[?]', clDeviceMaxWorkItemDimension)
+local defaultLocalWorkSize = ffi.new('size_t[?]', clDeviceMaxWorkItemDimension)
+local defaultGlobalWorkSize = ffi.new('size_t[?]', clDeviceMaxWorkItemDimension)
+for i=0,clDeviceMaxWorkItemDimension-1 do
+	defaultGlobalWorkOffset[i] = 0
+	defaultLocalWorkSize[i] = 1
+	defaultGlobalWorkSize[i] = 1
+end
+
 function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
 --print(debug.traceback())
-	--cmds = ffi.cast('cl_command_queue', cmds)
-	--kernelHandle = ffi.cast('cl_kernel', kernelHandle)
-	workDim = ffi.cast('cl_uint', workDim)
-	workDim = tonumber(workDim)
-	globalWorkOffset = ffi.cast('size_t*', globalWorkOffset)
-	globalWorkSize = ffi.cast('size_t*', globalWorkSize)
-	localWorkSize = ffi.cast('size_t*', localWorkSize)
-	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
-	waitListEvents = ffi.cast('cl_event*', waitListEvents)
-	event = ffi.cast('cl_event*', event)
 --print('clEnqueueNDRangeKernel', cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
 	
+	--cmds = ffi.cast('cl_command_queue', cmds)
 	local cmds, err = queueCastAndVerify(cmds)
 	if err then return err end
-
+	
+	--kernelHandle = ffi.cast('cl_kernel', kernelHandle)
 	local kernelHandle, err = kernelCastAndVerify(kernelHandle)
 	if err then return err end
 
 	local kernel = kernelsForID[kernelHandle[0].id]
+	if not kernel then return ffi.C.CL_INVALID_KERNEL end
 --print('kernel', kernel.name)
 
-	if numWaitListEvents > 0 and waitListEvents == nil then
-		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
+print('kernel.ctx', kernel.ctx)
+print('cmds[0].ctx', cmds[0].ctx)
+	if kernel.ctx ~= cmds[0].ctx then return ffi.C.CL_INVALID_CONTEXT end
+
+	workDim = ffi.cast('cl_uint', workDim)
+	workDim = tonumber(workDim)
+	if workDim < 1 or workDim > clDeviceMaxWorkItemDimension then return ffi.C.CL_INVALID_WORK_DIMENSION end
+
+	globalWorkOffset = ffi.cast('size_t*', globalWorkOffset)
+	if globalWorkOffset == nil then
+		globalWorkOffset = ffi.cast('size_t*', defaultGlobalWorkOffset)
+	end
+
+	globalWorkSize = ffi.cast('size_t*', globalWorkSize)
+	if globalWorkSize == nil then
+		globalWorkSize = ffi.cast('size_t*', defaultGlobalWorkSize)
+	end
+--	for i=0,clDeviceMaxWorkItemDimension-1 do
+--		if globalWorkSize[i] + globalWorkOffset[i] > max device work size then return ffi.C.CL_INVALID_GLOBAL_WORK_SIZE end
+--	end
+
+	localWorkSize = ffi.cast('size_t*', localWorkSize)
+	if localWorkSize == nil then
+		localWorkSize = ffi.cast('size_t*', defaultLocalWorkSize)
+	end
+	-- if the local work group size doesn't match the local size specified in the kernel's source then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
+	-- if the local work group size isn't consistent with the required number of sub-groups for the kernel in the program source then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
+	local totalLocalWorkSize = 1
+	for i=0,clDeviceMaxWorkItemDimension-1 do
+		totalLocalWorkSize = totalLocalWorkSize * localWorkSize[i]
+	end
+	if totalLocalWorkSize > clKernelWorkGroupSize then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
+	-- TODO return CL_INVALID_WORK_GROUP_SIZE if the program was compiled with cl-uniform-work-group-size and the number of work-items specified by global_work_size is not evenly divisible by size of work-group given by local_work_size or by the required work-group size specified in the kernel source.
+	if totalLocalWorkSize > clDeviceMaxWorkGroupSize then return ffi.C.CL_INVALID_WORK_ITEM_SIZE end
+
+	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
+	waitListEvents = ffi.cast('cl_event*', waitListEvents)
+	event = ffi.cast('cl_event*', event)
+	if numWaitListEvents > 0 then
+		if waitListEvents == nil then
+			return ffi.C.CL_INVALID_EVENT_WAIT_LIST
+		end
+		for i=0,numWaitListEvents-1 do
+			-- if cmds.ctx ~= waitListEvents.ctx then return ffi.C.CL_INVALID_CONTEXT end
+		end
 	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
 	
 	local program = kernel.program
+	if not program then return ffi.C.CL_INVALID_PROGRAM_EXECUTABLE end
 --print('program', program.libfile)
 --print('program id', program.id)
 	
@@ -2046,6 +2241,9 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 	local argInfos = kernel.argInfos
 	for i=1,kernel.numargs do
 		local argInfo = assert(argInfos[i])
+		if srcargs[i] == nil then		-- arg was not specified
+			return ffi.C.CL_INVALID_KERNEL_ARGS
+		end
 		local arg = srcargs[i].ptr
 		local size = srcargs[i].size
 --print('arg '..i)
@@ -2095,13 +2293,12 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 	local global_work_offset_v = {}
 	local global_work_size_v = {}
 	local local_work_size_v = {}
-	assert(workDim >= 1 and workDim <= 3)
 	for i=1,workDim do
 		global_work_offset_v[i] = tonumber(globalWorkOffset[i-1])
 		global_work_size_v[i] = tonumber(globalWorkSize[i-1])
 		local_work_size_v[i] = tonumber(localWorkSize[i-1])
 	end
-	for i=workDim+1,3 do
+	for i=workDim+1,clDeviceMaxWorkItemDimension do
 		global_work_offset_v[i] = 0
 		global_work_size_v[i] = 1
 		local_work_size_v[i] = 1
@@ -2119,6 +2316,7 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 		global_id_fields[n+1] = '_program_'..pid..'_global_id_'..n
 	end
 --print'...globals assigning'
+	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
 	local is = {}
 	for i=0,global_work_size_v[1]-1 do
 		for j=0,global_work_size_v[2]-1 do
