@@ -1550,7 +1550,7 @@ function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, result
 		},
 		-- 1.2:
 		--[ffi.C.CL_PROGRAM_BINARY_TYPE] = cl_program_binary_type
-		-- one of: 
+		-- one of:
 		-- CL_PROGRAM_BINARY_TYPE_NONE
 		-- CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT
 		-- CL_PROGRAM_BINARY_TYPE_LIBRARY
@@ -1754,7 +1754,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	devices = ffi.cast('cl_device_id*', devices)
 	if (devices == nil and numDevices > 0)
 	or (devices ~= nil and numDevices == 0)
-	then 
+	then
 		return ffi.C.CL_INVALID_VALUE
 	end
 	-- make a local copy so program can hold onto it
@@ -1983,6 +1983,10 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	-- search for it in the code maybe?
 	-- TODO do this upon clBuildProgram instead of at clCreateKernel
 	-- so that I can count the kernels and let clGetProgramInfo query them
+	-- TODO use 'strings' or ld or something to list all symbols
+	-- and then regex replace "kernel void (name)" with "void (KERNEL)_(name)"
+	-- (do so only after verifying (KERNEL) isn't used as a prefix among any functions in the library)
+	-- and then search for all those here, and deduce the signature
 
 	local sig = code:match('kernel%s+void%s+'..kernelName..'%s*%([^)]*%)')
 --print('found with signature:\n'..sig:gsub('%s+', ' '))
@@ -2181,8 +2185,8 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 	if not kernel then return ffi.C.CL_INVALID_KERNEL end
 --print('kernel', kernel.name)
 
-print('kernel.ctx', kernel.ctx)
-print('cmds[0].ctx', cmds[0].ctx)
+--print('kernel.ctx', kernel.ctx)
+--print('cmds[0].ctx', cmds[0].ctx)
 	if kernel.ctx ~= cmds[0].ctx then return ffi.C.CL_INVALID_CONTEXT end
 
 	workDim = ffi.cast('cl_uint', workDim)
@@ -2209,12 +2213,18 @@ print('cmds[0].ctx', cmds[0].ctx)
 	-- if the local work group size doesn't match the local size specified in the kernel's source then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
 	-- if the local work group size isn't consistent with the required number of sub-groups for the kernel in the program source then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
 	local totalLocalWorkSize = 1
-	for i=0,clDeviceMaxWorkItemDimension-1 do
+	for i=0,workDim-1 do
 		totalLocalWorkSize = totalLocalWorkSize * localWorkSize[i]
 	end
+--print('totalLocalWorkSize', totalLocalWorkSize)
+--print('clKernelWorkGroupSize', clKernelWorkGroupSize)
+--print('clDeviceMaxWorkGroupSize', clDeviceMaxWorkGroupSize)
 	if totalLocalWorkSize > clKernelWorkGroupSize then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
 	-- TODO return CL_INVALID_WORK_GROUP_SIZE if the program was compiled with cl-uniform-work-group-size and the number of work-items specified by global_work_size is not evenly divisible by size of work-group given by local_work_size or by the required work-group size specified in the kernel source.
 	if totalLocalWorkSize > clDeviceMaxWorkGroupSize then return ffi.C.CL_INVALID_WORK_ITEM_SIZE end
+if totalLocalWorkSize == 0 then
+	error'here'
+end
 
 	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
@@ -2307,7 +2317,7 @@ print('cmds[0].ctx', cmds[0].ctx)
 	local group_id_fields = {}
 	local global_id_fields = {}
 --print'assigning globals...'
-	for n=0,2 do
+	for n=0,clDeviceMaxWorkItemDimension-1 do
 		lib['_program_'..pid..'_local_size_'..n] = local_work_size_v[n+1]
 		-- does global size include the global offset?
 		lib['_program_'..pid..'_global_size_'..n] = global_work_size_v[n+1]
@@ -2321,12 +2331,17 @@ print('cmds[0].ctx', cmds[0].ctx)
 	for i=0,global_work_size_v[1]-1 do
 		for j=0,global_work_size_v[2]-1 do
 			for k=0,global_work_size_v[3]-1 do
+--print(i,j,k)
 				is[1]=i is[2]=j is[3]=k
-				for n=1,3 do
+				for n=1,clDeviceMaxWorkItemDimension  do
 					lib[local_id_fields[n]] = is[n] % local_work_size_v[n]
+--print(local_id_fields[n], lib[local_id_fields[n]])
 					lib[group_id_fields[n]] = is[n] / local_work_size_v[n]
+--print(group_id_fields[n], lib[group_id_fields[n]])
 					lib[global_id_fields[n]] = is[n] + global_work_offset_v[n]
+--print(global_id_fields[n], lib[global_id_fields[n]])
 				end
+
 --io.write('('..table.concat(is, ', ')..') ')
 				kernel.func(table.unpack(dstargs, 1, kernel.numargs))
 			end
