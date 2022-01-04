@@ -1606,7 +1606,7 @@ if ffi.os == 'Windows' then
 end
 ?>
 
-#define constant const
+#define constant
 #define global
 #define local
 
@@ -2017,11 +2017,8 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 			elseif tokens[j] == 'local' then
 				table.remove(tokens, j)
 				argInfo.isLocal = true
-			end
-		end
-		for j=1,#tokens do 	-- TODO table.replace?  how have I never needed table.replace until now?
-			if tokens[j] == 'constant' then
-				tokens[j] = 'const'
+			elseif tokens[j] == 'constant' then
+				table.remove(tokens, j)
 				argInfo.isConstant = true
 			end
 		end
@@ -2050,7 +2047,6 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	assert(#argInfos == numargs)
 
 	sigargs = sigargs:concat', '
-	-- now replace "constant structname const *" => "const void const *" with just "void *"
 
 	sig = 'void '..kernelName.. '(' .. sigargs .. ');'
 	
@@ -2092,6 +2088,7 @@ end
 function cl.clSetKernelArg(kernelHandle, index, size, value)
 	--kernelHandle = ffi.cast('cl_kernel', kernelHandle)
 	index = ffi.cast('cl_uint', index)
+	index = tonumber(index)
 	size = ffi.cast('size_t', size)
 	value = ffi.cast('void*', value)
 
@@ -2105,8 +2102,8 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 	if index >= kernel.numargs then
 		return ffi.C.CL_INVALID_ARG_INDEX
 	end
-	local argInfo = kernel.argInfos[tonumber(index)+1]
-	assert(argInfo, "tried to set kernel arg "..tonumber(index)
+	local argInfo = kernel.argInfos[index+1]
+	assert(argInfo, "tried to set kernel arg "..index
 		.." but arginfo is nil, only has "..#kernel.argInfos
 		.." though numargs is "..kernel.numargs)
 
@@ -2116,6 +2113,8 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 			return ffi.C.CL_INVALID_ARG_VALUE
 		end
 	end
+
+--print('clSetKernelArg', kernelHandle, index, size, value)
 	
 	-- if the kernel arg is global then the value better be a cl_mem ...
 	if argInfo.isGlobal
@@ -2141,9 +2140,15 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 		end
 	end
 
+	-- copy the value into the arg - in case the client gets rid of it later
+	local copyOfValue = ffi.new('uint8_t[?]', size)
+	if value ~= nil then
+		ffi.copy(copyOfValue, value, size)
+	end
+
 	-- mind you value is a void* by now.
 	-- if it's a global then it points to a struct _cl_mem
-	kernel.args[tonumber(index)+1] = {ptr=value, size=size}
+	kernel.args[index+1] = {ptr=copyOfValue, size=size}
 	
 	return ffi.C.CL_SUCCESS
 end
@@ -2251,18 +2256,20 @@ end
 	local argInfos = kernel.argInfos
 	for i=1,kernel.numargs do
 		local argInfo = assert(argInfos[i])
-		if srcargs[i] == nil then		-- arg was not specified
+		local srcarg = srcargs[i]
+		if srcarg == nil then		-- arg was not specified
 			return ffi.C.CL_INVALID_KERNEL_ARGS
 		end
-		local arg = srcargs[i].ptr
-		local size = srcargs[i].size
+		local arg = srcarg.ptr
+		local size = srcarg.size
 --print('arg '..i)
 --print('type(arg)', type(arg))
 --print('ffi.typeof(arg)', ffi.typeof(arg))
 --print('argInfo.origtype', argInfo.origtype)
 --print('argInfo.type', argInfo.type)
 		assert(type(arg) == 'cdata')
-		assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')
+		--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
+		assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer 
 		
 		if argInfo.isGlobal
 		or argInfo.isConstant
@@ -2276,6 +2283,7 @@ end
 			local _, err = memCastAndVerify(arg[0])
 			if err then
 				error'here'
+				return err
 			end
 --print('after cast, arg', arg)
 --print('after cast, arg[0]', arg[0])
@@ -2285,10 +2293,10 @@ end
 		elseif argInfo.isLocal then
 --print'isLocal'
 			-- use the pointer as-is
-			local localptr = srcargs[i].localptr
+			local localptr = srcarg.localptr
 			if not localptr then
 				localptr = ffi.new('uint8_t[?]', size)
-				srcargs[i].localptr = localptr
+				srcarg.localptr = localptr
 			end
 			arg = localptr
 		else
