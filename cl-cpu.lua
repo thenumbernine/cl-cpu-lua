@@ -816,9 +816,9 @@ cl.clGetDeviceInfo = makeGetter{
 				if paramSize < ffi.sizeof'size_t' * clDeviceMaxWorkItemDimension then
 					return ffi.C.CL_INVALID_VALUE
 				end
-				resultPtr[0] = 1
-				resultPtr[1] = 1
-				resultPtr[2] = 1
+				resultPtr[0] = 1024
+				resultPtr[1] = 1024
+				resultPtr[2] = 1024
 			end
 		end,
 	},
@@ -947,6 +947,7 @@ function cl.clCreateContext(properties, numDevices, devices, notify, userData, e
 	properties = ffi.cast('cl_context_properties*', properties)
 	numDevices = ffi.cast('cl_uint', numDevices)
 	devices = ffi.cast('cl_device_id*', devices)
+	errPtr = ffi.cast('cl_int*', errPtr)
 	-- if 'properties' is invalid, or if 'properties' is null and no platform could be selected, then return CL_INVALID_PLATFORM
 	-- if any value in 'properties' is not a valid name then return CL_INVALID_VALUE
 	for i=0,tonumber(numDevices)-1 do
@@ -961,7 +962,6 @@ function cl.clCreateContext(properties, numDevices, devices, notify, userData, e
 	end
 	-- notify is a callback ...
 	-- userData is userdata for the notify()
-	errPtr = ffi.cast('cl_int*', errPtr)
 	if errPtr ~= nil then
 		errPtr[0] = ffi.C.CL_SUCCESS
 	end
@@ -1961,6 +1961,12 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 --print(debug.traceback())
 	--programHandle = ffi.cast('cl_program', programHandle)
 	kernelName = ffi.cast('char*', kernelName)
+	if kernelName == nil then
+		if errPtr ~= nil then
+			errPtr[0] = ffi.C.CL_INVALID_VALUE
+		end
+		return ffi.cast('cl_kernel', nil)
+	end
 	kernelName = ffi.string(kernelName)
 	errPtr = ffi.cast('cl_int*', errPtr)
 --print('clCreateKernel', programHandle, kernelName, errPtr)
@@ -1974,6 +1980,14 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	end
 
 	local program = assert(programsForID[programHandle[0].id])
+	if program.status ~= ffi.C.CL_BUILD_SUCCESS
+	or program.lib == nil
+	then
+		if errPtr ~= nil then
+			errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE
+		end
+		return ffi.cast('cl_kernel', nil)
+	end
 
 	local code = removeCommentsAndApplyContinuations(program.code)
 
@@ -2053,8 +2067,17 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 --print("cdef'ing as sig:\n"..sig)
 	ffi.cdef(sig)
 
-	local func = program.lib[kernelName]
+	local func
+	if not pcall(function()
+		func = program.lib[kernelName]
 --print('func', func)
+	end) then
+		-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
+		if errPtr ~= nil then
+			errPtr[0] = ffi.C.CL_INVALID_KERNEL_NAME
+		end
+		return ffi.cast('cl_kernel', nil)
+	end
 
 	local kernelHandle = ffi.new'struct _cl_kernel[1]'
 	kernelHandle[0].verify = cl_kernel_verify
@@ -2269,7 +2292,7 @@ end
 --print('argInfo.type', argInfo.type)
 		assert(type(arg) == 'cdata')
 		--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
-		assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer 
+		assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer
 		
 		if argInfo.isGlobal
 		or argInfo.isConstant
