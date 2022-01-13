@@ -2018,6 +2018,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		arg = string.trim(arg)
 		local tokens = string.split(arg, '%s+')
 		-- split off any *'s into unique tokens
+		-- TODO not just at the end of the word.  that's just my coding style, right?
 		-- TODO how about []'s?
 		for j=#tokens,1,-1 do
 			while tokens[j]:sub(-1) == '*' do
@@ -2086,12 +2087,9 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		name = kernelName,
 		program = program,
 		func = func,
-		argInfos = argInfos,		-- holds for each arg: name, type, isGlobal, isLocal
+		argInfos = argInfos,		-- holds for each arg: name, type, isGlobal, isLocal, isConstant
 		args = {},					-- holds the clSetKernelArg() values
 		numargs = numargs,
-		isGlobal = isGlobal,
-		isLocal = isLocal,
-		isConstant = isConstant,
 		handle = kernelHandle,		-- hold so luajit doesn't free
 		ctx = program.ctx,
 	}
@@ -2179,7 +2177,7 @@ end
 function cl.clGetKernelWorkGroupInfo(kernelID, device, name, paramSize, resultPtr, sizePtr)
 	return handleGetter({
 		name = 'clGetKernelWorkGroupInfo',
-		infotype = 'cl_kernel_info',
+		infotype = 'cl_kernel_work_group_info',
 		idcast = kernelCastAndVerify,
 		[ffi.C.CL_KERNEL_WORK_GROUP_SIZE] = {
 			type = 'size_t',
