@@ -1,6 +1,7 @@
 local ffi = require 'ffi'
 local table = require 'ext.table'
 local io = require 'ext.io'
+local file = require 'ext.file'
 local string = require 'ext.string'
 local template = require 'template'
 
@@ -11,8 +12,8 @@ local extraStrictVerification = true
 
 
 --local kernelCallMethod = 'Lua'
-local kernelCallMethod = 'C-singlethread'
---local kernelCallMethod = 'C-multithread'
+--local kernelCallMethod = 'C-singlethread'
+local kernelCallMethod = 'C-multithread'
 
 
 if kernelCallMethod == 'C-singlethread' 
@@ -1478,10 +1479,40 @@ local gcc = require 'ffi-c.c'
 -- c++ fails on field initialization
 --local gcc = require 'ffi-c.cpp'
 
-function gcc:addExtraObjFiles(objfiles)
+function gcc:addExtraObjFiles(objfiles, result)
 	if kernelCallMethod == 'C-multithread' then
-		error'TODO include exec-multi.cpp'
-os.exit(1)	
+		
+		local libIndex = #self.libfiles
+		local name = 'libtmp-'..self.cobjIndex..'-'..libIndex..'-multi'
+		
+		local pushcompiler = self.env.compiler
+		local pushlinker = self.env.linker
+		self.env.compiler = 'g++'
+		self.env.linker = 'g++'
+	
+		-- TODO determine path ... based on cl-cpu's launched location?
+		local srcsrcfile = '../cl-cpu/exec-multi.cpp'
+		local srcfile = name..'.cpp'
+		file[srcfile] = template(file[srcsrcfile], {
+			numcores = numcores,
+			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+			id = self.currentProgramID,
+		})
+		local objfile = name..'.obj'
+
+		self.env.objLogFile = name..'-obj-multi.log'	-- what's this for again?
+		local status, compileLog = self.env:buildObj(objfile, srcfile) 	-- TODO allow capture output log
+		result.compileLog = result.compileLog..compileLog
+		if not status then
+			result.error = "failed to build c code"
+			error'here'	-- throwing away errors?
+			--return result
+		end
+
+		objfiles:insert(objfile)
+
+		self.env.compiler = pushcompiler
+		self.env.linker = pushlinker
 	end
 end
 
@@ -1777,7 +1808,11 @@ int4 int4_add(int4 a, int4 b) {
 	};
 }
 
-<? if kernelCallMethod == 'C-singlethread' then ?>
+<? 
+if kernelCallMethod == 'C-singlethread' 
+or kernelCallMethod == 'C-multithread' 
+then 
+?>
 
 // needs to have ffi_type defined
 typedef void * ffi_type;
@@ -1981,6 +2016,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 
 	local headerCode
 	xpcall(function()
+		gcc.currentProgramID = program.id
 		local result = gcc:compile(program.code)
 		if result.error then error(result.error) end
 --print('done compiling program entry', id)
@@ -2033,15 +2069,13 @@ void ffi_set_<?=f[2]?>(ffi_type ** const);
 
 typedef void * ffi_cif;
 
-<? if kernelCallMethod == 'C-singlethread' then ?>
-
 void executeKernelSingleThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values
 );
 
-<? elseif kernelCallMethod == 'C-multithread' then ?>
+<? if kernelCallMethod == 'C-multithread' then ?>
 
 void executeKernelMultiThread(
 	ffi_cif * cif,
@@ -2067,7 +2101,7 @@ void executeKernelMultiThread(
 		local libdata = assert(io.readfile(result.libfile), "couldn't open file "..result.libfile)
 		local compileLog = result.compileLog
 		local linkLog = result.linkLog
-			
+		
 		program.lib = lib
 		program.libfile = libfile
 		program.libdata = libdata
@@ -2079,12 +2113,13 @@ void executeKernelMultiThread(
 		program.options = options
 
 	end, function(err)
-print('gcc code:')
-print(require 'template.showcode'(code))
-print('header code:')
-print(require 'template.showcode'(headerCode))
-print('error while compiling: '..err)
-print(debug.traceback())
+io.stderr:write('gcc code:', '\n')
+io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
+io.stderr:write('header code:', '\n')
+io.stderr:write(require 'template.showcode'(tostring(headerCode)), '\n')
+io.stderr:write('error while compiling: '..tostring(err), '\n')
+io.stderr:write(debug.traceback(), '\n')
+io.stderr:flush()
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
@@ -2300,9 +2335,12 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	ffi.cdef(sig)
 
 	local func
-	if not pcall(function()
+	if not xpcall(function()
 		func = program.lib[kernelName]
 --print('func', func)
+	end, function(err)
+		print('error while compiling: '..err)
+		print(debug.traceback())
 	end) then
 		-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
 		if errPtr ~= nil then
