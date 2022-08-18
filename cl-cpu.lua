@@ -12,6 +12,7 @@ local extraStrictVerification = true
 
 --local kernelCallMethod = 'Lua'
 local kernelCallMethod = 'C-singlethread'
+--local kernelCallMethod = 'C-multithread'
 
 
 if kernelCallMethod == 'C-singlethread' then
@@ -53,6 +54,11 @@ for _,f in ipairs(ffi_all_types) do
 	ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
 end
 
+
+local numcores = 1
+if kernelCallMethod == 'C-multithread' then
+	-- TODO get numcores from hardware_concurrency
+end
 
 
 -- copied from ffi/OpenCL.lua
@@ -1711,30 +1717,48 @@ typedef union {
 <? end ?>
 
 
-EXTERN size_t _program_<?=id?>_global_id_0 = 0;
-EXTERN size_t _program_<?=id?>_global_id_1 = 0;
-EXTERN size_t _program_<?=id?>_global_id_2 = 0;
-#define get_global_id(n)	_program_<?=id?>_global_id_##n
+EXTERN uint _program_<?=id?>_work_dim = 0;
+#define get_work_dim()	_program_<?=id?>_work_dim
 
 EXTERN size_t _program_<?=id?>_global_size_0 = 0;
 EXTERN size_t _program_<?=id?>_global_size_1 = 0;
 EXTERN size_t _program_<?=id?>_global_size_2 = 0;
 #define get_global_size(n)	_program_<?=id?>_global_size_##n
 
-EXTERN size_t _program_<?=id?>_local_id_0 = 0;
-EXTERN size_t _program_<?=id?>_local_id_1 = 0;
-EXTERN size_t _program_<?=id?>_local_id_2 = 0;
-#define get_local_id(n)	_program_<?=id?>_local_id_##n
-
 EXTERN size_t _program_<?=id?>_local_size_0 = 0;
 EXTERN size_t _program_<?=id?>_local_size_1 = 0;
 EXTERN size_t _program_<?=id?>_local_size_2 = 0;
 #define get_local_size(n)	_program_<?=id?>_local_size_##n
 
-EXTERN size_t _program_<?=id?>_group_id_0 = 0;
-EXTERN size_t _program_<?=id?>_group_id_1 = 0;
-EXTERN size_t _program_<?=id?>_group_id_2 = 0;
-#define get_group_id(n)	_program_<?=id?>_group_id_##n
+//this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
+#define get_enqueued_local_size(n)	_program_<?=id?>_local_size_##n
+
+EXTERN size_t _program_<?=id?>_num_groups_0 = 0;
+EXTERN size_t _program_<?=id?>_num_groups_1 = 0;
+EXTERN size_t _program_<?=id?>_num_groups_2 = 0;
+#define get_num_groups(n)	_program_<?=id?>_num_groups_##n
+
+
+// TODO the following need to know which core you're on:
+
+EXTERN size_t _program_<?=id?>_global_linear_id[<?=numcores?>] = {0};
+#define get_global_linear_id() _program_<?=id?>_global_linear_id[0]
+
+EXTERN size_t _program_<?=id?>_global_id_0[<?=numcores?>] = {0};
+EXTERN size_t _program_<?=id?>_global_id_1[<?=numcores?>] = {0};
+EXTERN size_t _program_<?=id?>_global_id_2[<?=numcores?>] = {0};
+#define get_global_id(n)	_program_<?=id?>_global_id_##n[0]
+
+EXTERN size_t _program_<?=id?>_local_id_0[<?=numcores?>] = {0};
+EXTERN size_t _program_<?=id?>_local_id_1[<?=numcores?>] = {0};
+EXTERN size_t _program_<?=id?>_local_id_2[<?=numcores?>] = {0};
+#define get_local_id(n)	_program_<?=id?>_local_id_##n[0]
+
+EXTERN size_t _program_<?=id?>_group_id_0[<?=numcores?>] = {0};
+EXTERN size_t _program_<?=id?>_group_id_1[<?=numcores?>] = {0};
+EXTERN size_t _program_<?=id?>_group_id_2[<?=numcores?>] = {0};
+#define get_group_id(n)	_program_<?=id?>_group_id_##n[0]
+
 
 int4 int4_add(int4 a, int4 b) {
 	return (int4){
@@ -1751,7 +1775,7 @@ EXTERN size_t _program_<?=id?>_global_work_offset_0 = 0;
 EXTERN size_t _program_<?=id?>_global_work_offset_1 = 0;
 EXTERN size_t _program_<?=id?>_global_work_offset_2 = 0;
 
-// needs to have ffi_type defined 
+// needs to have ffi_type defined
 typedef void * ffi_type;
 typedef void * ffi_cif;
 
@@ -1765,55 +1789,58 @@ void executeKernelSingleThread(
 	void (*func)(),
 	void ** values
 ) {
+	_program_<?=id?>_global_linear_id[0] = 0;
+
 	size_t i_0 = 0;
 	for (
-		_program_<?=id?>_local_id_0 = 0,
-		_program_<?=id?>_group_id_0 = 0,
-		_program_<?=id?>_global_id_0 = _program_<?=id?>_global_work_offset_0;
+		_program_<?=id?>_local_id_0[0] = 0,
+		_program_<?=id?>_group_id_0[0] = 0,
+		_program_<?=id?>_global_id_0[0] = _program_<?=id?>_global_work_offset_0;
 
 		i_0 < _program_<?=id?>_global_size_0;
 
 		++i_0,
-		++_program_<?=id?>_local_id_0,
-		++_program_<?=id?>_global_id_0
+		++_program_<?=id?>_local_id_0[0],
+		++_program_<?=id?>_global_id_0[0]
 	) {
-		if (_program_<?=id?>_local_id_0 == _program_<?=id?>_local_size_0) {
-			_program_<?=id?>_local_id_0 = 0;
-			++_program_<?=id?>_group_id_0;
+		if (_program_<?=id?>_local_id_0[0] == _program_<?=id?>_local_size_0) {
+			_program_<?=id?>_local_id_0[0] = 0;
+			++_program_<?=id?>_group_id_0[0];
 		}
 
 		size_t i_1 = 0;
 		for (
-			_program_<?=id?>_local_id_1 = 0,
-			_program_<?=id?>_group_id_1 = 0,
-			_program_<?=id?>_global_id_1 = _program_<?=id?>_global_work_offset_1;
+			_program_<?=id?>_local_id_1[0] = 0,
+			_program_<?=id?>_group_id_1[0] = 0,
+			_program_<?=id?>_global_id_1[0] = _program_<?=id?>_global_work_offset_1;
 
 			i_1 < _program_<?=id?>_global_size_1;
 
 			++i_1,
-			++_program_<?=id?>_local_id_1,
-			++_program_<?=id?>_global_id_1
+			++_program_<?=id?>_local_id_1[0],
+			++_program_<?=id?>_global_id_1[0]
 		) {
-			if (_program_<?=id?>_local_id_1 == _program_<?=id?>_local_size_1) {
-				_program_<?=id?>_local_id_1 = 1;
-				++_program_<?=id?>_group_id_1;
+			if (_program_<?=id?>_local_id_1[0] == _program_<?=id?>_local_size_1) {
+				_program_<?=id?>_local_id_1[0] = 1;
+				++_program_<?=id?>_group_id_1[0];
 			}
 
 			size_t i_2 = 0;
 			for (
-				_program_<?=id?>_local_id_2 = 0,
-				_program_<?=id?>_group_id_2 = 0,
-				_program_<?=id?>_global_id_2 = _program_<?=id?>_global_work_offset_2;
+				_program_<?=id?>_local_id_2[0] = 0,
+				_program_<?=id?>_group_id_2[0] = 0,
+				_program_<?=id?>_global_id_2[0] = _program_<?=id?>_global_work_offset_2;
 
 				i_2 < _program_<?=id?>_global_size_2;
 
 				++i_2,
-				++_program_<?=id?>_local_id_2,
-				++_program_<?=id?>_global_id_2
+				++_program_<?=id?>_local_id_2[0],
+				++_program_<?=id?>_global_id_2[0],
+				++_program_<?=id?>_global_linear_id[0]
 			) {
-				if (_program_<?=id?>_local_id_2 == _program_<?=id?>_local_size_2) {
-					_program_<?=id?>_local_id_2 = 2;
-					++_program_<?=id?>_group_id_2;
+				if (_program_<?=id?>_local_id_2[0] == _program_<?=id?>_local_size_2) {
+					_program_<?=id?>_local_id_2[0] = 2;
+					++_program_<?=id?>_group_id_2[0];
 				}
 
 				void *tmpret;
@@ -1830,6 +1857,7 @@ void executeKernelSingleThread(
 			vectorTypes = vectorTypes,
 			kernelCallMethod = kernelCallMethod,
 			ffi_all_types = ffi_all_types,
+			numcores = numcores,
 		}),
 	}
 	for i=0,tonumber(numStrings)-1 do
@@ -1945,25 +1973,33 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- gcc:compile calls ffi.load
 		-- so these should now be available:
 		headerCode = template([[
-size_t _program_<?=id?>_global_id_0;
-size_t _program_<?=id?>_global_id_1;
-size_t _program_<?=id?>_global_id_2;
+uint _program_<?=id?>_work_dim;
 
 size_t _program_<?=id?>_global_size_0;
 size_t _program_<?=id?>_global_size_1;
 size_t _program_<?=id?>_global_size_2;
 
-size_t _program_<?=id?>_local_id_0;
-size_t _program_<?=id?>_local_id_1;
-size_t _program_<?=id?>_local_id_2;
-
 size_t _program_<?=id?>_local_size_0;
 size_t _program_<?=id?>_local_size_1;
 size_t _program_<?=id?>_local_size_2;
 
-size_t _program_<?=id?>_group_id_0;
-size_t _program_<?=id?>_group_id_1;
-size_t _program_<?=id?>_group_id_2;
+size_t _program_<?=id?>_num_groups_0;
+size_t _program_<?=id?>_num_groups_1;
+size_t _program_<?=id?>_num_groups_2;
+
+size_t _program_<?=id?>_global_linear_id[<?=numcores?>];
+
+size_t _program_<?=id?>_global_id_0[<?=numcores?>];
+size_t _program_<?=id?>_global_id_1[<?=numcores?>];
+size_t _program_<?=id?>_global_id_2[<?=numcores?>];
+
+size_t _program_<?=id?>_local_id_0[<?=numcores?>];
+size_t _program_<?=id?>_local_id_1[<?=numcores?>];
+size_t _program_<?=id?>_local_id_2[<?=numcores?>];
+
+size_t _program_<?=id?>_group_id_0[<?=numcores?>];
+size_t _program_<?=id?>_group_id_1[<?=numcores?>];
+size_t _program_<?=id?>_group_id_2[<?=numcores?>];
 
 
 <? if kernelCallMethod == 'C-singlethread' then ?>
@@ -1992,6 +2028,7 @@ void executeKernelSingleThread(
 			id = id,
 			kernelCallMethod = kernelCallMethod,
 			ffi_all_types = ffi_all_types,
+			numcores = numcores,
 		})
 		ffi.cdef(headerCode)
 
@@ -2289,8 +2326,8 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 				-- TODO better way to do this?
 				local k = tostring(ffi.typeof(argInfo.type))
 				local settername = ffi_setter_for_ctype[k]
-				if not settername then 
-					print("couldn't find setter for type "..k) 
+				if not settername then
+print("couldn't find setter for type "..k)
 					errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE
 				else
 					lib[settername](ffi_atypes+i-1)
@@ -2491,7 +2528,7 @@ end
 	local argInfos = kernel.argInfos
 	
 	-- used with kernelCallMethod == 'Lua'
-	local dstargs	
+	local dstargs
 	-- used with kernelCallMethod == 'C-singlethread'
 	local ffi_atypes
 	local ffi_rtype
@@ -2615,62 +2652,84 @@ end
 	local global_work_offset_v = {}
 	local global_work_size_v = {}
 	local local_work_size_v = {}
+	local num_groups_v = {}
 	for i=1,workDim do
 		global_work_offset_v[i] = tonumber(globalWorkOffset[i-1])
 		global_work_size_v[i] = tonumber(globalWorkSize[i-1])
 		local_work_size_v[i] = tonumber(localWorkSize[i-1])
+		num_groups_v[i] = globalWorkSize[i-1] / localWorkSize[i-1]
+		if globalWorkSize[i-1] % localWorkSize[i-1] ~= 0 then
+			num_groups_v[i] = num_groups_v[i] + 1
+		end
 	end
 	for i=workDim+1,clDeviceMaxWorkItemDimension do
 		global_work_offset_v[i] = 0
 		global_work_size_v[i] = 1
 		local_work_size_v[i] = 1
+		num_groups_v[i] = 1
 	end
-	local local_id_fields = {}
-	local group_id_fields = {}
-	local global_id_fields = {}
 --print'assigning globals...'
+	lib['_program_'..pid..'_work_dim'] = workDim
 	for n=0,clDeviceMaxWorkItemDimension-1 do
 		lib['_program_'..pid..'_local_size_'..n] = local_work_size_v[n+1]
-		-- does global size include the global offset?
 		lib['_program_'..pid..'_global_size_'..n] = global_work_size_v[n+1]
-		local_id_fields[n+1] = '_program_'..pid..'_local_id_'..n
-		group_id_fields[n+1] = '_program_'..pid..'_group_id_'..n
-		global_id_fields[n+1] = '_program_'..pid..'_global_id_'..n
-		
-		if kernelCallMethod == 'C-singlethread' then
-			lib['_program_'..pid..'_global_work_offset_'..n] = global_work_offset_v[n+1]
-		end
+		lib['_program_'..pid..'_num_groups_'..n] = num_groups_v[n+1]
 	end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
 	if kernelCallMethod == 'Lua' then
+		local global_linear_id_ptr = lib['_program_'..pid..'_global_linear_id']
+		local local_id_ptrs = {}
+		local  group_id_ptrs = {}
+		local global_id_ptrs = {}
+		for n=0,clDeviceMaxWorkItemDimension-1 do
+			local_id_ptrs[n+1] = lib['_program_'..pid..'_local_id_'..n]
+			group_id_ptrs[n+1] = lib['_program_'..pid..'_group_id_'..n]
+			global_id_ptrs[n+1] = lib['_program_'..pid..'_global_id_'..n]
+		end	
+		
+		global_linear_id_ptr[0] = 0
 		local is = {}
 		for i=0,global_work_size_v[1]-1 do
 			for j=0,global_work_size_v[2]-1 do
 				for k=0,global_work_size_v[3]-1 do
-	--print(i,j,k)
-					is[1]=i is[2]=j is[3]=k
+--print(i,j,k)
+					is[1]=i 
+					is[2]=j 
+					is[3]=k
 					for n=1,clDeviceMaxWorkItemDimension  do
-						lib[local_id_fields[n]] = is[n] % local_work_size_v[n]
-	--print(local_id_fields[n], lib[local_id_fields[n]])
-						lib[group_id_fields[n]] = is[n] / local_work_size_v[n]
-	--print(group_id_fields[n], lib[group_id_fields[n]])
-						lib[global_id_fields[n]] = is[n] + global_work_offset_v[n]
-	--print(global_id_fields[n], lib[global_id_fields[n]])
+						local_id_ptrs[n][0] = is[n] % local_work_size_v[n]
+--print(local_id_ptrs[n][0])
+						group_id_ptrs[n][0] = is[n] / local_work_size_v[n]
+--print(group_id_ptrs[n][0])
+						global_id_ptrs[n][0] = is[n] + global_work_offset_v[n]
+--print(global_id_ptrs[n][0])
 					end
 
-	--io.write('('..table.concat(is, ', ')..') ')
+--io.write('('..table.concat(is, ', ')..') ')
 					-- TODO don't use real C function args, instead use globals with names associated with the kernel, i.e. <kernel>_arg<i>
 					-- and then immediately store them upon clSetKernelArg
-					-- but this would mean replacing all functions and their prototypes in the C code with empty-args, and then inserting code in the function beginning to copy from these global vars into the function local vars ... 
+					-- but this would mean replacing all functions and their prototypes in the C code with empty-args, and then inserting code in the function beginning to copy from these global vars into the function local vars ...
 					kernel.func(table.unpack(dstargs, 1, kernel.numargs))
+				
+					global_linear_id_ptr[0] = global_linear_id_ptr[0] + 1
 				end
 			end
 		end
 	elseif kernelCallMethod == 'C-singlethread' then
+		for n=0,clDeviceMaxWorkItemDimension-1 do
+			if kernelCallMethod == 'C-singlethread' then
+				lib['_program_'..pid..'_global_work_offset_'..n] = global_work_offset_v[n+1]
+			end
+		end
 		lib.executeKernelSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	else
-		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async 
+		for n=0,clDeviceMaxWorkItemDimension-1 do
+			if kernelCallMethod == 'C-singlethread' then
+				lib['_program_'..pid..'_global_work_offset_'..n] = global_work_offset_v[n+1]
+			end
+		end
+		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async
 		-- ... but how to forward / pass varargs?
 		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
 		-- also, if each kernel function call needs a different local_id, group_id, and global_id ...
