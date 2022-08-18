@@ -11,22 +11,10 @@ extern "C" {
 
 typedef struct {
 	uint work_dim;
-
-	size_t global_size_0;
-	size_t global_size_1;
-	size_t global_size_2;
-
-	size_t local_size_0;
-	size_t local_size_1;
-	size_t local_size_2;
-
-	size_t num_groups_0;
-	size_t num_groups_1;
-	size_t num_groups_2;
-
-	size_t global_work_offset_0;
-	size_t global_work_offset_1;
-	size_t global_work_offset_2;
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
+	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
 extern cl_globalinfo_t _program_<?=id?>_globalinfo;
 
@@ -34,11 +22,11 @@ extern cl_globalinfo_t _program_<?=id?>_globalinfo;
 // the multithread implementation needs a unique one of these per-thread.
 
 typedef struct {
-	extern size_t global_linear_id;
-	extern size_t local_linear_id;
-	extern size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
-	extern size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-	extern size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t global_linear_id;
+	size_t local_linear_id;
+	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
 extern cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
@@ -53,9 +41,9 @@ void executeKernelMultiThread(
 	std::itoa(cpuids.begin(), cpuids.end(), 0);
 	std::vector<std::future<bool>> handles(<?=numcores?>);
 
-	size_t size = globalinfo->global_size_0
-		* globalinfo->global_size_1
-		* globalinfo->global_size_2;
+	size_t size = globalinfo->global_size[0]
+		* globalinfo->global_size[1]
+		* globalinfo->global_size[2];
 
 	for (size_t coreid = 0; coreid < <?=numcores?>; ++coreid) {
 		handles[coreid] = std::async(std::launch::async,
@@ -67,24 +55,25 @@ void executeKernelMultiThread(
 				for (size_t i = ibegin; i < iend; ++i) {
 					threadinfo->global_linear_id = i;
 				
-					size_t i_0 = i % globalinfo->global_size_0;
-					threadinfo->local_id[0] = i_0 % globalinfo->local_size_0;
-					threadinfo->group_id[0] = i_0 / globalinfo->local_size_0;
-					threadinfo->group_id[0] = i_0 + globalinfo->global_work_offset_0;
+					size_t is[<?=clDeviceMaxWorkItemDimension?>];
+					is[0] = i % globalinfo->global_size[0];
+					threadinfo->local_id[0] = is[0] % globalinfo->local_size[0];
+					threadinfo->group_id[0] = is[0] / globalinfo->local_size[0];
+					threadinfo->group_id[0] = is[0] + globalinfo->global_work_offset[0];
 					
-					size_t i_1 = (i / globalinfo->global_size_0) % globalinfo->global_size_1;
-					threadinfo->local_id[1] = i_1 % globalinfo->local_size_1;
-					threadinfo->group_id[1] = i_1 / globalinfo->local_size_1;
-					threadinfo->group_id[1] = i_1 + globalinfo->global_work_offset_1;
+					is[1] = (i / globalinfo->global_size[0]) % globalinfo->global_size[1];
+					threadinfo->local_id[1] = is[1] % globalinfo->local_size[1];
+					threadinfo->group_id[1] = is[1] / globalinfo->local_size[1];
+					threadinfo->group_id[1] = is[1] + globalinfo->global_work_offset[1];
 					
-					size_t i_2 = (i / globalinfo->global_size_0) / globalinfo->global_size_1;
-					threadinfo->local_id[2] = i_2 % globalinfo->local_size_2;
-					threadinfo->group_id[2] = i_2 / globalinfo->local_size_2;
-					threadinfo->group_id[2] = i_2 + globalinfo->global_work_offset_2;
+					is[2] = (i / globalinfo->global_size[0]) / globalinfo->global_size[1];
+					threadinfo->local_id[2] = is[2] % globalinfo->local_size[2];
+					threadinfo->group_id[2] = is[2] / globalinfo->local_size[2];
+					threadinfo->group_id[2] = is[2] + globalinfo->global_work_offset[2];
 				
 					threadinfo->local_linear_id = 
-						threadinfo->local_id[0] + globalinfo->local_size_0 * (
-							threadinfo->local_id[1] + globalinfo->local_size_1 * (
+						threadinfo->local_id[0] + globalinfo->local_size[0] * (
+							threadinfo->local_id[1] + globalinfo->local_size[1] * (
 								threadinfo->local_id[2]
 							)
 						)

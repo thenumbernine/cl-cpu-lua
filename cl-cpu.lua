@@ -10,8 +10,8 @@ require 'ffi.c.stdlib'	-- rand()
 local extraStrictVerification = true
 
 
-local kernelCallMethod = 'Lua'
---local kernelCallMethod = 'C-singlethread'
+--local kernelCallMethod = 'Lua'
+local kernelCallMethod = 'C-singlethread'
 --local kernelCallMethod = 'C-multithread'
 
 
@@ -1719,46 +1719,32 @@ typedef union {
 
 typedef struct {
 	uint work_dim;
-
-	size_t global_size_0;
-	size_t global_size_1;
-	size_t global_size_2;
-
-	size_t local_size_0;
-	size_t local_size_1;
-	size_t local_size_2;
-
-	size_t num_groups_0;
-	size_t num_groups_1;
-	size_t num_groups_2;
-
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 <? 
 if kernelCallMethod == 'C-singlethread' 
 or kernelCallMethod == 'C-multithread' 
 then ?>
-	size_t global_work_offset_0;
-	size_t global_work_offset_1;
-	size_t global_work_offset_2;
+	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 <? end ?>
-
 } cl_globalinfo_t;
 EXTERN cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 #define get_work_dim()	_program_<?=id?>_globalinfo.work_dim
-#define get_global_size(n)	_program_<?=id?>_globalinfo.global_size_##n
-#define get_local_size(n)	_program_<?=id?>_globalinfo.local_size_##n
+#define get_global_size(n)	_program_<?=id?>_globalinfo.global_size[n]
+#define get_local_size(n)	_program_<?=id?>_globalinfo.local_size[n]
 
 //this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
-#define get_enqueued_local_size(n)	_program_<?=id?>_globalinfo.local_size_##n
+#define get_enqueued_local_size(n)	_program_<?=id?>_globalinfo.local_size[n]
 
-#define get_num_groups(n)	_program_<?=id?>_globalinfo.num_groups_##n
+#define get_num_groups(n)	_program_<?=id?>_globalinfo.num_groups[n]
 
 
 // everything in the following need to know which core you're on:
 typedef struct {
 	size_t global_linear_id;
 	size_t local_linear_id;
-
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
@@ -1801,61 +1787,63 @@ void executeKernelSingleThread(
 	cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo;
 	threadinfo->global_linear_id = 0;
 
-	size_t i_0 = 0;
+	size_t is[<?=clDeviceMaxWorkItemDimension?>];
+
+	is[0] = 0;
 	for (
 		threadinfo->local_id[0] = 0,
 		threadinfo->group_id[0] = 0,
-		threadinfo->global_id[0] = globalinfo->global_work_offset_0;
+		threadinfo->global_id[0] = globalinfo->global_work_offset[0];
 
-		i_0 < globalinfo->global_size_0;
+		is[0] < globalinfo->global_size[0];
 
-		++i_0,
+		++is[0],
 		++threadinfo->local_id[0],
 		++threadinfo->global_id[0]
 	) {
-		if (threadinfo->local_id[0] == globalinfo->local_size_0) {
+		if (threadinfo->local_id[0] == globalinfo->local_size[0]) {
 			threadinfo->local_id[0] = 0;
 			++threadinfo->group_id[0];
 		}
 
-		size_t i_1 = 0;
+		is[1] = 0;
 		for (
 			threadinfo->local_id[1] = 0,
 			threadinfo->group_id[1] = 0,
-			threadinfo->global_id[1] = globalinfo->global_work_offset_1;
+			threadinfo->global_id[1] = globalinfo->global_work_offset[1];
 
-			i_1 < globalinfo->global_size_1;
+			is[1] < globalinfo->global_size[1];
 
-			++i_1,
+			++is[1],
 			++threadinfo->local_id[1],
 			++threadinfo->global_id[1]
 		) {
-			if (threadinfo->local_id[1] == globalinfo->local_size_1) {
+			if (threadinfo->local_id[1] == globalinfo->local_size[1]) {
 				threadinfo->local_id[1] = 0;
 				++threadinfo->group_id[1];
 			}
 
-			size_t i_2 = 0;
+			is[2] = 0;
 			for (
 				threadinfo->local_id[2] = 0,
 				threadinfo->group_id[2] = 0,
-				threadinfo->global_id[2] = globalinfo->global_work_offset_2;
+				threadinfo->global_id[2] = globalinfo->global_work_offset[2];
 
-				i_2 < globalinfo->global_size_2;
+				is[2] < globalinfo->global_size[2];
 
-				++i_2,
+				++is[2],
 				++threadinfo->local_id[2],
 				++threadinfo->global_id[2],
 				++threadinfo->global_linear_id
 			) {
-				if (threadinfo->local_id[2] == globalinfo->local_size_2) {
+				if (threadinfo->local_id[2] == globalinfo->local_size[2]) {
 					threadinfo->local_id[2] = 0;
 					++threadinfo->group_id[2];
 				}
 
 				threadinfo->local_linear_id = 
-					threadinfo->local_id[0] + globalinfo->local_size_0 * (
-						threadinfo->local_id[1] + globalinfo->local_size_1 * (
+					threadinfo->local_id[0] + globalinfo->local_size[0] * (
+						threadinfo->local_id[1] + globalinfo->local_size[1] * (
 							threadinfo->local_id[2]
 						)
 					)
@@ -1867,9 +1855,7 @@ void executeKernelSingleThread(
 		}
 	}
 }
-
 <? end -- kernelCallMethod == 'C-singlethread' ?>
-
 ]], 	{
 			id = id,
 			vectorTypes = vectorTypes,
@@ -1996,29 +1982,15 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 //everything accessible everywhere goes here
 typedef struct {
 	uint work_dim;
-
-	size_t global_size_0;
-	size_t global_size_1;
-	size_t global_size_2;
-
-	size_t local_size_0;
-	size_t local_size_1;
-	size_t local_size_2;
-
-	size_t num_groups_0;
-	size_t num_groups_1;
-	size_t num_groups_2;
-
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 <? 
 if kernelCallMethod == 'C-singlethread' 
 or kernelCallMethod == 'C-multithread' 
 then 
 ?>
-
-	size_t global_work_offset_0;
-	size_t global_work_offset_1;
-	size_t global_work_offset_2;
-
+	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 <? end ?>
 } cl_globalinfo_t;
 cl_globalinfo_t _program_<?=id?>_globalinfo;
@@ -2704,9 +2676,9 @@ end
 	local globalinfo = lib['_program_'..pid..'_globalinfo']
 	globalinfo.work_dim = workDim
 	for n=0,clDeviceMaxWorkItemDimension-1 do
-		globalinfo['local_size_'..n] = local_work_size_v[n+1]
-		globalinfo['global_size_'..n] = global_work_size_v[n+1]
-		globalinfo['num_groups_'..n] = num_groups_v[n+1]
+		globalinfo.local_size[n] = local_work_size_v[n+1]
+		globalinfo.global_size[n] = global_work_size_v[n+1]
+		globalinfo.num_groups[n] = num_groups_v[n+1]
 	end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
@@ -2748,14 +2720,14 @@ end
 	elseif kernelCallMethod == 'C-singlethread' then
 		for n=0,clDeviceMaxWorkItemDimension-1 do
 			if kernelCallMethod == 'C-singlethread' then
-				globalinfo['global_work_offset_'..n] = global_work_offset_v[n+1]
+				globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 			end
 		end
 		lib.executeKernelSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	else
 		for n=0,clDeviceMaxWorkItemDimension-1 do
 			if kernelCallMethod == 'C-singlethread' then
-				globalinfo['global_work_offset_'..n] = global_work_offset_v[n+1]
+				globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 			end
 		end
 		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async
