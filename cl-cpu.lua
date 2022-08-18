@@ -1744,6 +1744,9 @@ EXTERN size_t _program_<?=id?>_num_groups_2 = 0;
 EXTERN size_t _program_<?=id?>_global_linear_id[<?=numcores?>] = {0};
 #define get_global_linear_id() _program_<?=id?>_global_linear_id[0]
 
+EXTERN size_t _program_<?=id?>_local_linear_id[<?=numcores?>] = {0};
+#define get_local_linear_id() _program_<?=id?>_local_linear_id[0]
+
 EXTERN size_t _program_<?=id?>_global_id_0[<?=numcores?>] = {0};
 EXTERN size_t _program_<?=id?>_global_id_1[<?=numcores?>] = {0};
 EXTERN size_t _program_<?=id?>_global_id_2[<?=numcores?>] = {0};
@@ -1821,7 +1824,7 @@ void executeKernelSingleThread(
 			++_program_<?=id?>_global_id_1[0]
 		) {
 			if (_program_<?=id?>_local_id_1[0] == _program_<?=id?>_local_size_1) {
-				_program_<?=id?>_local_id_1[0] = 1;
+				_program_<?=id?>_local_id_1[0] = 0;
 				++_program_<?=id?>_group_id_1[0];
 			}
 
@@ -1839,9 +1842,17 @@ void executeKernelSingleThread(
 				++_program_<?=id?>_global_linear_id[0]
 			) {
 				if (_program_<?=id?>_local_id_2[0] == _program_<?=id?>_local_size_2) {
-					_program_<?=id?>_local_id_2[0] = 2;
+					_program_<?=id?>_local_id_2[0] = 0;
 					++_program_<?=id?>_group_id_2[0];
 				}
+
+				_program_<?=id?>_local_linear_id[0] = 
+					_program_<?=id?>_local_id_0[0] + _program_<?=id?>_local_size_0 * (
+						_program_<?=id?>_local_id_1[0] + _program_<?=id?>_local_size_1 * (
+							_program_<?=id?>_local_id_2[0]
+						)
+					)
+				;
 
 				void *tmpret;
 				ffi_call(cif, func, &tmpret, values);
@@ -1988,6 +1999,8 @@ size_t _program_<?=id?>_num_groups_1;
 size_t _program_<?=id?>_num_groups_2;
 
 size_t _program_<?=id?>_global_linear_id[<?=numcores?>];
+
+size_t _program_<?=id?>_local_linear_id[<?=numcores?>];
 
 size_t _program_<?=id?>_global_id_0[<?=numcores?>];
 size_t _program_<?=id?>_global_id_1[<?=numcores?>];
@@ -2679,6 +2692,7 @@ end
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
 	if kernelCallMethod == 'Lua' then
 		local global_linear_id_ptr = lib['_program_'..pid..'_global_linear_id']
+		local local_linear_id_ptr = lib['_program_'..pid..'_local_linear_id']
 		local local_id_ptrs = {}
 		local  group_id_ptrs = {}
 		local global_id_ptrs = {}
@@ -2705,6 +2719,13 @@ end
 						global_id_ptrs[n][0] = is[n] + global_work_offset_v[n]
 --print(global_id_ptrs[n][0])
 					end
+
+					local_linear_id_ptr[0] = 
+						is[1] + local_work_size_v[1] * (
+							is[2] + local_work_size_v[2] * (
+								is[3]
+							)
+						)
 
 --io.write('('..table.concat(is, ', ')..') ')
 					-- TODO don't use real C function args, instead use globals with names associated with the kernel, i.e. <kernel>_arg<i>
