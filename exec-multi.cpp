@@ -34,18 +34,9 @@ extern size_t _program_<?=id?>_global_work_offset_2;
 typedef struct {
 	extern size_t global_linear_id;
 	extern size_t local_linear_id;
-
-	extern size_t local_id_0;
-	extern size_t local_id_1;
-	extern size_t local_id_2;
-
-	extern size_t group_id_0;
-	extern size_t group_id_1;
-	extern size_t group_id_2;
-
-	extern size_t global_id_0;
-	extern size_t global_id_1;
-	extern size_t global_id_2;
+	extern size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
+	extern size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
+	extern size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
 extern cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
@@ -73,24 +64,24 @@ void executeKernelMultiThread(
 					info->global_linear_id = i;
 				
 					size_t i_0 = i % _program_<?=id?>_global_size_0;
-					info->local_id_0 = i_0 % _program_<?=id?>_local_size_0;
-					info->group_id_0 = i_0 / _program_<?=id?>_local_size_0;
-					info->global_id_0 = i_0 + _program_<?=id?>_global_work_offset_0;
+					info->local_id[0] = i_0 % _program_<?=id?>_local_size_0;
+					info->group_id[0] = i_0 / _program_<?=id?>_local_size_0;
+					info->group_id[0] = i_0 + _program_<?=id?>_global_work_offset_0;
 					
 					size_t i_1 = (i / _program_<?=id?>_global_size_0) % _program_<?=id?>_global_size_1;
-					info->local_id_1 = i_1 % _program_<?=id?>_local_size_1;
-					info->group_id_1 = i_1 / _program_<?=id?>_local_size_1;
-					info->global_id_1 = i_1 + _program_<?=id?>_global_work_offset_1;
+					info->local_id[1] = i_1 % _program_<?=id?>_local_size_1;
+					info->group_id[1] = i_1 / _program_<?=id?>_local_size_1;
+					info->group_id[1] = i_1 + _program_<?=id?>_global_work_offset_1;
 					
 					size_t i_2 = (i / _program_<?=id?>_global_size_0) / _program_<?=id?>_global_size_1;
-					info->local_id_2 = i_2 % _program_<?=id?>_local_size_2;
-					info->group_id_2 = i_2 / _program_<?=id?>_local_size_2;
-					info->global_id_2 = i_2 + _program_<?=id?>_global_work_offset_2;
+					info->local_id[2] = i_2 % _program_<?=id?>_local_size_2;
+					info->group_id[2] = i_2 / _program_<?=id?>_local_size_2;
+					info->group_id[2] = i_2 + _program_<?=id?>_global_work_offset_2;
 				
 					info->local_linear_id = 
-						info->local_id_0 + _program_<?=id?>_local_size_0 * (
-							info->local_id_1 + _program_<?=id?>_local_size_1 * (
-								info->local_id_2
+						info->local_id[0] + _program_<?=id?>_local_size_0 * (
+							info->local_id[1] + _program_<?=id?>_local_size_1 * (
+								info->local_id[2]
 							)
 						)
 					;

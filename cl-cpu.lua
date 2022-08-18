@@ -1744,25 +1744,17 @@ typedef struct {
 	size_t global_linear_id;
 	size_t local_linear_id;
 
-	size_t global_id_0;
-	size_t global_id_1;
-	size_t global_id_2;
-
-	size_t local_id_0;
-	size_t local_id_1;
-	size_t local_id_2;
-
-	size_t group_id_0;
-	size_t group_id_1;
-	size_t group_id_2;
+	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
 EXTERN cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 #define get_global_linear_id() 	_program_<?=id?>_threadinfo[0].global_linear_id
 #define get_local_linear_id() 	_program_<?=id?>_threadinfo[0].local_linear_id
-#define get_global_id(n)		_program_<?=id?>_threadinfo[0].global_id_##n
-#define get_local_id(n)			_program_<?=id?>_threadinfo[0].local_id_##n
-#define get_group_id(n)			_program_<?=id?>_threadinfo[0].group_id_##n
+#define get_global_id(n)		_program_<?=id?>_threadinfo[0].global_id[n]
+#define get_local_id(n)			_program_<?=id?>_threadinfo[0].local_id[n]
+#define get_group_id(n)			_program_<?=id?>_threadinfo[0].group_id[n]
 
 
 int4 int4_add(int4 a, int4 b) {
@@ -1799,60 +1791,60 @@ void executeKernelSingleThread(
 
 	size_t i_0 = 0;
 	for (
-		info->local_id_0 = 0,
-		info->group_id_0 = 0,
-		info->global_id_0 = _program_<?=id?>_global_work_offset_0;
+		info->local_id[0] = 0,
+		info->group_id[0] = 0,
+		info->global_id[0] = _program_<?=id?>_global_work_offset_0;
 
 		i_0 < _program_<?=id?>_global_size_0;
 
 		++i_0,
-		++info->local_id_0,
-		++info->global_id_0
+		++info->local_id[0],
+		++info->global_id[0]
 	) {
-		if (info->local_id_0 == _program_<?=id?>_local_size_0) {
-			info->local_id_0 = 0;
-			++info->group_id_0;
+		if (info->local_id[0] == _program_<?=id?>_local_size_0) {
+			info->local_id[0] = 0;
+			++info->group_id[0];
 		}
 
 		size_t i_1 = 0;
 		for (
-			info->local_id_1 = 0,
-			info->group_id_1 = 0,
-			info->global_id_1 = _program_<?=id?>_global_work_offset_1;
+			info->local_id[1] = 0,
+			info->group_id[1] = 0,
+			info->global_id[1] = _program_<?=id?>_global_work_offset_1;
 
 			i_1 < _program_<?=id?>_global_size_1;
 
 			++i_1,
-			++info->local_id_1,
-			++info->global_id_1
+			++info->local_id[1],
+			++info->global_id[1]
 		) {
-			if (info->local_id_1 == _program_<?=id?>_local_size_1) {
-				info->local_id_1 = 0;
-				++info->group_id_1;
+			if (info->local_id[1] == _program_<?=id?>_local_size_1) {
+				info->local_id[1] = 0;
+				++info->group_id[1];
 			}
 
 			size_t i_2 = 0;
 			for (
-				info->local_id_2 = 0,
-				info->group_id_2 = 0,
-				info->global_id_2 = _program_<?=id?>_global_work_offset_2;
+				info->local_id[2] = 0,
+				info->group_id[2] = 0,
+				info->global_id[2] = _program_<?=id?>_global_work_offset_2;
 
 				i_2 < _program_<?=id?>_global_size_2;
 
 				++i_2,
-				++info->local_id_2,
-				++info->global_id_2,
+				++info->local_id[2],
+				++info->global_id[2],
 				++info->global_linear_id
 			) {
-				if (info->local_id_2 == _program_<?=id?>_local_size_2) {
-					info->local_id_2 = 0;
-					++info->group_id_2;
+				if (info->local_id[2] == _program_<?=id?>_local_size_2) {
+					info->local_id[2] = 0;
+					++info->group_id[2];
 				}
 
 				info->local_linear_id = 
-					info->local_id_0 + _program_<?=id?>_local_size_0 * (
-						info->local_id_1 + _program_<?=id?>_local_size_1 * (
-							info->local_id_2
+					info->local_id[0] + _program_<?=id?>_local_size_0 * (
+						info->local_id[1] + _program_<?=id?>_local_size_1 * (
+							info->local_id[2]
 						)
 					)
 				;
@@ -1872,6 +1864,7 @@ void executeKernelSingleThread(
 			kernelCallMethod = kernelCallMethod,
 			ffi_all_types = ffi_all_types,
 			numcores = numcores,
+			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 		}),
 	}
 	for i=0,tonumber(numStrings)-1 do
@@ -2007,17 +2000,9 @@ typedef struct {
 	size_t global_linear_id;
 	size_t local_linear_id;
 
-	size_t global_id_0;
-	size_t global_id_1;
-	size_t global_id_2;
-
-	size_t local_id_0;
-	size_t local_id_1;
-	size_t local_id_2;
-
-	size_t group_id_0;
-	size_t group_id_1;
-	size_t group_id_2;
+	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
 cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
@@ -2049,6 +2034,7 @@ void executeKernelSingleThread(
 			kernelCallMethod = kernelCallMethod,
 			ffi_all_types = ffi_all_types,
 			numcores = numcores,
+			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 		})
 		ffi.cdef(headerCode)
 
@@ -2710,9 +2696,9 @@ end
 					is[2]=j 
 					is[3]=k
 					for n=1,clDeviceMaxWorkItemDimension  do
-						info[0]['local_id_'..(n-1)] = is[n] % local_work_size_v[n]
-						info[0]['group_id_'..(n-1)] = is[n] / local_work_size_v[n]
-						info[0]['global_id_'..(n-1)] = is[n] + global_work_offset_v[n]
+						info[0].local_id[n-1] = is[n] % local_work_size_v[n]
+						info[0].group_id[n-1] = is[n] / local_work_size_v[n]
+						info[0].global_id[n-1] = is[n] + global_work_offset_v[n]
 					end
 
 					info[0].local_linear_id = 
