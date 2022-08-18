@@ -12,8 +12,8 @@ local extraStrictVerification = true
 
 
 --local kernelCallMethod = 'Lua'
---local kernelCallMethod = 'C-singlethread'
-local kernelCallMethod = 'C-multithread'
+local kernelCallMethod = 'C-singlethread'
+--local kernelCallMethod = 'C-multithread'
 
 
 if kernelCallMethod == 'C-singlethread' 
@@ -1808,15 +1808,16 @@ int4 int4_add(int4 a, int4 b) {
 	};
 }
 
+// TODO should include isfinite(x) ? NAN : ...
+#define sign(x)	((x) > 0 ? 1 : ((x) < 0 ? -1 : 0))
+
 <? 
 if kernelCallMethod == 'C-singlethread' 
 or kernelCallMethod == 'C-multithread' 
 then 
 ?>
 
-// needs to have ffi_type defined
-typedef void * ffi_type;
-typedef void * ffi_cif;
+#include <ffi.h>
 
 <? for _,f in ipairs(ffi_all_types) do ?>
 extern ffi_type ffi_type_<?=f[2]?>;
