@@ -15,7 +15,9 @@ local kernelCallMethod = 'C-singlethread'
 --local kernelCallMethod = 'C-multithread'
 
 
-if kernelCallMethod == 'C-singlethread' then
+if kernelCallMethod == 'C-singlethread' 
+or kernelCallMethod == 'C-multithread' 
+then
 	require 'ffi.ffi'	-- this is lib-ffi, not luajit-ffi
 end
 
@@ -1476,6 +1478,13 @@ local gcc = require 'ffi-c.c'
 -- c++ fails on field initialization
 --local gcc = require 'ffi-c.cpp'
 
+function gcc:addExtraObjFiles(objfiles)
+	if kernelCallMethod == 'C-multithread' then
+		error'TODO include exec-multi.cpp'
+os.exit(1)	
+	end
+end
+
 local cl_program_verify = ffi.C.rand()
 
 -- global
@@ -1722,10 +1731,11 @@ typedef struct {
 	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-<? 
-if kernelCallMethod == 'C-singlethread' 
-or kernelCallMethod == 'C-multithread' 
-then ?>
+<?
+if kernelCallMethod == 'C-singlethread'
+or kernelCallMethod == 'C-multithread'
+then 
+?>
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 <? end ?>
 } cl_globalinfo_t;
@@ -1841,7 +1851,7 @@ void executeKernelSingleThread(
 					++threadinfo->group_id[2];
 				}
 
-				threadinfo->local_linear_id = 
+				threadinfo->local_linear_id =
 					threadinfo->local_id[0] + globalinfo->local_size[0] * (
 						threadinfo->local_id[1] + globalinfo->local_size[1] * (
 							threadinfo->local_id[2]
@@ -1985,10 +1995,10 @@ typedef struct {
 	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-<? 
-if kernelCallMethod == 'C-singlethread' 
-or kernelCallMethod == 'C-multithread' 
-then 
+<?
+if kernelCallMethod == 'C-singlethread'
+or kernelCallMethod == 'C-multithread'
+then
 ?>
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 <? end ?>
@@ -2009,7 +2019,11 @@ cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 
 
-<? if kernelCallMethod == 'C-singlethread' then ?>
+<? 
+if kernelCallMethod == 'C-singlethread' 
+or kernelCallMethod == 'C-multithread' 
+then 
+?>
 
 typedef void * ffi_type;
 
@@ -2019,12 +2033,23 @@ void ffi_set_<?=f[2]?>(ffi_type ** const);
 
 typedef void * ffi_cif;
 
+<? if kernelCallMethod == 'C-singlethread' then ?>
+
 void executeKernelSingleThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values
 );
 
+<? elseif kernelCallMethod == 'C-multithread' then ?>
+
+void executeKernelMultiThread(
+	ffi_cif * cif,
+	void (*func)(),
+	void ** values
+);
+
+<? end ?>
 <? end ?>
 
 ]], 	{
@@ -2301,8 +2326,10 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	}
 
 	-- if we're using C+FFI then setup the CIF here
-	if kernelCallMethod == 'C-singlethread' then
-		ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
+	if kernelCallMethod == 'C-singlethread' 
+	or kernelCallMethod == 'C-multithread' 
+	then
+		local ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
 		kernel.ffi_atypes = ffi_atypes
 	
 		kernel.ffi_rtype = ffi.new('ffi_type*[1]')
@@ -2533,12 +2560,6 @@ end
 	
 	-- used with kernelCallMethod == 'Lua'
 	local dstargs
-	-- used with kernelCallMethod == 'C-singlethread'
-	local ffi_atypes
-	local ffi_rtype
-	local ffi_values
-	local ffi_ptrs	-- since most often values has to point to a pointer
-
 	if kernelCallMethod == 'Lua' then
 		dstargs = {}
 		for i=1,kernel.numargs do
@@ -2593,16 +2614,15 @@ end
 	--print('arg value', arg)
 			dstargs[i] = arg
 		end
-	elseif kernelCallMethod == 'C-singlethread' then
-		ffi_atypes = kernel.ffi_atypes
-		ffi_rtype = kernel.ffi_rtype
-		ffi_values = kernel.ffi_values
-		ffi_ptrs = kernel.ffi_ptrs
-		
+	elseif kernelCallMethod == 'C-singlethread' 
+	or kernelCallMethod == 'C-multithread' 
+	then
+		-- used with kernelCallMethod == 'C-singlethread' or 'C-multithread'
+		-- since most often values has to point to a pointer
 		-- reset all values before assigning from what the user provided
 		-- TODO this could be skipped if value-setting was all done in clSetKernelArg
 		for i=0,kernel.numargs-1 do
-			ffi_values[i] = ffi_ptrs + i
+			kernel.ffi_values[i] = kernel.ffi_ptrs + i
 		end
 		
 		for i=1,kernel.numargs do
@@ -2632,7 +2652,7 @@ end
 				end
 				
 				-- ffi says this should be a pointer-to-a-pointer
-				ffi_ptrs[i-1] = arg[0][0].ptr
+				kernel.ffi_ptrs[i-1] = arg[0][0].ptr
 			elseif argInfo.isLocal then
 				-- use the pointer as-is
 				local localptr = srcarg.localptr
@@ -2641,12 +2661,12 @@ end
 					srcarg.localptr = localptr
 				end
 				-- ffi says this should be a pointer-to-a-pointer
-				ffi_ptrs[i-1] = localptr
+				kernel.ffi_ptrs[i-1] = localptr
 			else
 				-- can't get pointers in luajit, not even to externs, bleh
 				-- so I have to wrap that in C code ...
 				-- then assign the values[i] to some alloc'd pointer holding it
-				ffi_values[i-1] = arg
+				kernel.ffi_values[i-1] = arg
 			end
 		end
 	end
@@ -2691,8 +2711,8 @@ end
 			for j=0,global_work_size_v[2]-1 do
 				for k=0,global_work_size_v[3]-1 do
 --print(i,j,k)
-					is[1]=i 
-					is[2]=j 
+					is[1]=i
+					is[2]=j
 					is[3]=k
 					for n=1,clDeviceMaxWorkItemDimension  do
 						threadinfo[0].local_id[n-1] = is[n] % local_work_size_v[n]
@@ -2700,7 +2720,7 @@ end
 						threadinfo[0].global_id[n-1] = is[n] + global_work_offset_v[n]
 					end
 
-					threadinfo[0].local_linear_id = 
+					threadinfo[0].local_linear_id =
 						is[1] + local_work_size_v[1] * (
 							is[2] + local_work_size_v[2] * (
 								is[3]
@@ -2719,24 +2739,21 @@ end
 		end
 	elseif kernelCallMethod == 'C-singlethread' then
 		for n=0,clDeviceMaxWorkItemDimension-1 do
-			if kernelCallMethod == 'C-singlethread' then
-				globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
-			end
+			globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 		end
 		lib.executeKernelSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
-	else
+	elseif kernelCallMethod == 'C-multithread' then
 		for n=0,clDeviceMaxWorkItemDimension-1 do
-			if kernelCallMethod == 'C-singlethread' then
-				globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
-			end
+			globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 		end
 		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async
 		-- ... but how to forward / pass varargs?
 		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
 		-- also, if each kernel function call needs a different local_id, group_id, and global_id ...
 		-- ... I guess those need to be per-thread variables, so probably need to be replaced with a macro somehow and then stored in arguments of the C function?
-		kernelCallAsync(
-		)
+		lib.executeKernelMultiThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+	else
+		error("unknown kernelCallMethod "..tostring(kernelCallMethod))
 	end
 --print('clEnqueueNDRangeKernel done')
 	return ffi.C.CL_SUCCESS

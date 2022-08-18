@@ -71,7 +71,7 @@ void executeKernelMultiThread(
 					threadinfo->group_id[2] = is[2] / globalinfo->local_size[2];
 					threadinfo->group_id[2] = is[2] + globalinfo->global_work_offset[2];
 				
-					threadinfo->local_linear_id = 
+					threadinfo->local_linear_id =
 						threadinfo->local_id[0] + globalinfo->local_size[0] * (
 							threadinfo->local_id[1] + globalinfo->local_size[1] * (
 								threadinfo->local_id[2]
