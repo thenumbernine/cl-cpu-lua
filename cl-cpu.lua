@@ -10,16 +10,15 @@ require 'ffi.c.stdlib'	-- rand()
 local extraStrictVerification = true
 
 
-local kernelCallMethod = 'Lua'
---local kernelCallMethod = 'C-singlethread'
+--local kernelCallMethod = 'Lua'
+local kernelCallMethod = 'C-singlethread'
 
 
 if kernelCallMethod == 'C-singlethread' then
 	require 'ffi.ffi'	-- this is lib-ffi, not luajit-ffi
 end
 
--- used for enumeration
-local ffi_arg_types = table{
+local ffi_all_types = table{
 --[[ these are typedef'd to others
 	'uchar',
 	'schar',
@@ -31,24 +30,29 @@ local ffi_arg_types = table{
 	'slong',
 --]]
 	-- [1] = C name, [2] = ffi name
-	{'uint8', 'uint8'},
-	{'sint8', 'sint8'},
-	{'uint16', 'uint16'},
-	{'sint16', 'sint16'},
-	{'uint32', 'uint32'},
-	{'sint32', 'sint32'},
-	{'uint64', 'uint64'},
-	{'sint64', 'sint64'},
+	{'uint8_t', 'uint8'},
+	{'int8_t', 'sint8'},
+	{'uint16_t', 'uint16'},
+	{'int16_t', 'sint16'},
+	{'uint32_t', 'uint32'},
+	{'int32_t', 'sint32'},
+	{'uint64_t', 'uint64'},
+	{'int64_t', 'sint64'},
 	{'float', 'float'},
 	{'double', 'double'},
 	{'long double', 'longdouble'},
-}
-
--- these don't need enumeration for arg types
-local ffi_all_types = table(ffi_arg_types):append{
+	
+	-- these don't need setters
 	{'void', 'void'},
 	{'void*', 'pointer'},
 }
+
+local ffi_setter_for_ctype = {}
+for _,f in ipairs(ffi_all_types) do
+	local k = tostring(ffi.typeof(f[1]))
+	ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
+end
+
 
 
 -- copied from ffi/OpenCL.lua
@@ -1751,20 +1755,10 @@ EXTERN size_t _program_<?=id?>_global_work_offset_2 = 0;
 typedef void * ffi_type;
 typedef void * ffi_cif;
 
-extern ffi_type ffi_type_void;
-void ffi_set_void(ffi_type ** const t) { t[0] = &ffi_type_void; }
-
-extern ffi_type ffi_type_pointer;
-void ffi_set_pointer(ffi_type ** const t) { t[0] = &ffi_type_pointer; }
-
-extern ffi_type ffi_type_sint32;
-void ffi_set_sint32(ffi_type ** const t) { t[0] = &ffi_type_sint32; }
-
-extern ffi_type ffi_type_float;
-void ffi_set_float(ffi_type ** const t) { t[0] = &ffi_type_float; }
-
-extern ffi_type ffi_type_double;
-void ffi_set_double(ffi_type ** const t) { t[0] = &ffi_type_double; }
+<? for _,f in ipairs(ffi_all_types) do ?>
+extern ffi_type ffi_type_<?=f[2]?>;
+void ffi_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
+<? end ?>
 
 void executeKernelSingleThread(
 	ffi_cif * cif,
@@ -1835,6 +1829,7 @@ void executeKernelSingleThread(
 			id = id,
 			vectorTypes = vectorTypes,
 			kernelCallMethod = kernelCallMethod,
+			ffi_all_types = ffi_all_types,
 		}),
 	}
 	for i=0,tonumber(numStrings)-1 do
@@ -1979,11 +1974,9 @@ size_t _program_<?=id?>_global_work_offset_2;
 
 typedef void * ffi_type;
 
-void ffi_set_void(ffi_type ** const);
-void ffi_set_pointer(ffi_type ** const);
-void ffi_set_sint32(ffi_type ** const);
-void ffi_set_float(ffi_type ** const);
-void ffi_set_double(ffi_type ** const);
+<? for _,f in ipairs(ffi_all_types) do ?>
+void ffi_set_<?=f[2]?>(ffi_type ** const);
+<? end ?>
 
 typedef void * ffi_cif;
 
@@ -1998,6 +1991,7 @@ void executeKernelSingleThread(
 ]], 	{
 			id = id,
 			kernelCallMethod = kernelCallMethod,
+			ffi_all_types = ffi_all_types,
 		})
 		ffi.cdef(headerCode)
 
@@ -2293,16 +2287,13 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 				-- which could be typedef'd
 				-- so I have to consult luajit's ffi for more info
 				-- TODO better way to do this?
-				local t = ffi.typeof(argInfo.type)
-
-				if t == ffi.typeof'int32_t' then
-					lib.ffi_set_sint32(ffi_atypes+i-1)
-				elseif t == ffi.typeof'float' then
-					lib.ffi_set_float(ffi_atypes+i-1)
-				elseif t == ffi.typeof'double' then
-					lib.ffi_set_double(ffi_atypes+i-1)
+				local k = tostring(ffi.typeof(argInfo.type))
+				local settername = ffi_setter_for_ctype[k]
+				if not settername then 
+					print("couldn't find setter for type "..k) 
+					errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE
 				else
-					error("don't know how to ffi set the type "..argInfo.type)
+					lib[settername](ffi_atypes+i-1)
 				end
 			end
 		end
