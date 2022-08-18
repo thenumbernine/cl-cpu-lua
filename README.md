@@ -1,3 +1,5 @@
+[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=KYWUWS86GSFGL)
+
 I haven't had the best of luck with the CPU OpenCL implementation of Intel OpenCL.
 I guess AMD's CPU OpenCL is dead.
 So for now I'll make a LuaJIT version.
