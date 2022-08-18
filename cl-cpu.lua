@@ -10,8 +10,8 @@ require 'ffi.c.stdlib'	-- rand()
 local extraStrictVerification = true
 
 
---local kernelCallMethod = 'Lua'
-local kernelCallMethod = 'C-singlethread'
+local kernelCallMethod = 'Lua'
+--local kernelCallMethod = 'C-singlethread'
 --local kernelCallMethod = 'C-multithread'
 
 
@@ -1717,26 +1717,41 @@ typedef union {
 <? end ?>
 
 
-EXTERN uint _program_<?=id?>_work_dim = 0;
-#define get_work_dim()	_program_<?=id?>_work_dim
+typedef struct {
+	uint work_dim;
 
-EXTERN size_t _program_<?=id?>_global_size_0 = 0;
-EXTERN size_t _program_<?=id?>_global_size_1 = 0;
-EXTERN size_t _program_<?=id?>_global_size_2 = 0;
-#define get_global_size(n)	_program_<?=id?>_global_size_##n
+	size_t global_size_0;
+	size_t global_size_1;
+	size_t global_size_2;
 
-EXTERN size_t _program_<?=id?>_local_size_0 = 0;
-EXTERN size_t _program_<?=id?>_local_size_1 = 0;
-EXTERN size_t _program_<?=id?>_local_size_2 = 0;
-#define get_local_size(n)	_program_<?=id?>_local_size_##n
+	size_t local_size_0;
+	size_t local_size_1;
+	size_t local_size_2;
+
+	size_t num_groups_0;
+	size_t num_groups_1;
+	size_t num_groups_2;
+
+<? 
+if kernelCallMethod == 'C-singlethread' 
+or kernelCallMethod == 'C-multithread' 
+then ?>
+	size_t global_work_offset_0;
+	size_t global_work_offset_1;
+	size_t global_work_offset_2;
+<? end ?>
+
+} cl_globalinfo_t;
+EXTERN cl_globalinfo_t _program_<?=id?>_globalinfo;
+
+#define get_work_dim()	_program_<?=id?>_globalinfo.work_dim
+#define get_global_size(n)	_program_<?=id?>_globalinfo.global_size_##n
+#define get_local_size(n)	_program_<?=id?>_globalinfo.local_size_##n
 
 //this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
-#define get_enqueued_local_size(n)	_program_<?=id?>_local_size_##n
+#define get_enqueued_local_size(n)	_program_<?=id?>_globalinfo.local_size_##n
 
-EXTERN size_t _program_<?=id?>_num_groups_0 = 0;
-EXTERN size_t _program_<?=id?>_num_groups_1 = 0;
-EXTERN size_t _program_<?=id?>_num_groups_2 = 0;
-#define get_num_groups(n)	_program_<?=id?>_num_groups_##n
+#define get_num_groups(n)	_program_<?=id?>_globalinfo.num_groups_##n
 
 
 // everything in the following need to know which core you're on:
@@ -1768,10 +1783,6 @@ int4 int4_add(int4 a, int4 b) {
 
 <? if kernelCallMethod == 'C-singlethread' then ?>
 
-EXTERN size_t _program_<?=id?>_global_work_offset_0 = 0;
-EXTERN size_t _program_<?=id?>_global_work_offset_1 = 0;
-EXTERN size_t _program_<?=id?>_global_work_offset_2 = 0;
-
 // needs to have ffi_type defined
 typedef void * ffi_type;
 typedef void * ffi_cif;
@@ -1786,65 +1797,66 @@ void executeKernelSingleThread(
 	void (*func)(),
 	void ** values
 ) {
-	cl_threadinfo_t * info = _program_<?=id?>_threadinfo;
-	info->global_linear_id = 0;
+	cl_globalinfo_t * globalinfo = &_program_<?=id?>_globalinfo;
+	cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo;
+	threadinfo->global_linear_id = 0;
 
 	size_t i_0 = 0;
 	for (
-		info->local_id[0] = 0,
-		info->group_id[0] = 0,
-		info->global_id[0] = _program_<?=id?>_global_work_offset_0;
+		threadinfo->local_id[0] = 0,
+		threadinfo->group_id[0] = 0,
+		threadinfo->global_id[0] = globalinfo->global_work_offset_0;
 
-		i_0 < _program_<?=id?>_global_size_0;
+		i_0 < globalinfo->global_size_0;
 
 		++i_0,
-		++info->local_id[0],
-		++info->global_id[0]
+		++threadinfo->local_id[0],
+		++threadinfo->global_id[0]
 	) {
-		if (info->local_id[0] == _program_<?=id?>_local_size_0) {
-			info->local_id[0] = 0;
-			++info->group_id[0];
+		if (threadinfo->local_id[0] == globalinfo->local_size_0) {
+			threadinfo->local_id[0] = 0;
+			++threadinfo->group_id[0];
 		}
 
 		size_t i_1 = 0;
 		for (
-			info->local_id[1] = 0,
-			info->group_id[1] = 0,
-			info->global_id[1] = _program_<?=id?>_global_work_offset_1;
+			threadinfo->local_id[1] = 0,
+			threadinfo->group_id[1] = 0,
+			threadinfo->global_id[1] = globalinfo->global_work_offset_1;
 
-			i_1 < _program_<?=id?>_global_size_1;
+			i_1 < globalinfo->global_size_1;
 
 			++i_1,
-			++info->local_id[1],
-			++info->global_id[1]
+			++threadinfo->local_id[1],
+			++threadinfo->global_id[1]
 		) {
-			if (info->local_id[1] == _program_<?=id?>_local_size_1) {
-				info->local_id[1] = 0;
-				++info->group_id[1];
+			if (threadinfo->local_id[1] == globalinfo->local_size_1) {
+				threadinfo->local_id[1] = 0;
+				++threadinfo->group_id[1];
 			}
 
 			size_t i_2 = 0;
 			for (
-				info->local_id[2] = 0,
-				info->group_id[2] = 0,
-				info->global_id[2] = _program_<?=id?>_global_work_offset_2;
+				threadinfo->local_id[2] = 0,
+				threadinfo->group_id[2] = 0,
+				threadinfo->global_id[2] = globalinfo->global_work_offset_2;
 
-				i_2 < _program_<?=id?>_global_size_2;
+				i_2 < globalinfo->global_size_2;
 
 				++i_2,
-				++info->local_id[2],
-				++info->global_id[2],
-				++info->global_linear_id
+				++threadinfo->local_id[2],
+				++threadinfo->global_id[2],
+				++threadinfo->global_linear_id
 			) {
-				if (info->local_id[2] == _program_<?=id?>_local_size_2) {
-					info->local_id[2] = 0;
-					++info->group_id[2];
+				if (threadinfo->local_id[2] == globalinfo->local_size_2) {
+					threadinfo->local_id[2] = 0;
+					++threadinfo->group_id[2];
 				}
 
-				info->local_linear_id = 
-					info->local_id[0] + _program_<?=id?>_local_size_0 * (
-						info->local_id[1] + _program_<?=id?>_local_size_1 * (
-							info->local_id[2]
+				threadinfo->local_linear_id = 
+					threadinfo->local_id[0] + globalinfo->local_size_0 * (
+						threadinfo->local_id[1] + globalinfo->local_size_1 * (
+							threadinfo->local_id[2]
 						)
 					)
 				;
@@ -1980,19 +1992,36 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- gcc:compile calls ffi.load
 		-- so these should now be available:
 		headerCode = template([[
-uint _program_<?=id?>_work_dim;
 
-size_t _program_<?=id?>_global_size_0;
-size_t _program_<?=id?>_global_size_1;
-size_t _program_<?=id?>_global_size_2;
+//everything accessible everywhere goes here
+typedef struct {
+	uint work_dim;
 
-size_t _program_<?=id?>_local_size_0;
-size_t _program_<?=id?>_local_size_1;
-size_t _program_<?=id?>_local_size_2;
+	size_t global_size_0;
+	size_t global_size_1;
+	size_t global_size_2;
 
-size_t _program_<?=id?>_num_groups_0;
-size_t _program_<?=id?>_num_groups_1;
-size_t _program_<?=id?>_num_groups_2;
+	size_t local_size_0;
+	size_t local_size_1;
+	size_t local_size_2;
+
+	size_t num_groups_0;
+	size_t num_groups_1;
+	size_t num_groups_2;
+
+<? 
+if kernelCallMethod == 'C-singlethread' 
+or kernelCallMethod == 'C-multithread' 
+then 
+?>
+
+	size_t global_work_offset_0;
+	size_t global_work_offset_1;
+	size_t global_work_offset_2;
+
+<? end ?>
+} cl_globalinfo_t;
+cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 
 // everything in the following need to know which core you're on:
@@ -2007,11 +2036,8 @@ typedef struct {
 cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 
-<? if kernelCallMethod == 'C-singlethread' then ?>
 
-size_t _program_<?=id?>_global_work_offset_0;
-size_t _program_<?=id?>_global_work_offset_1;
-size_t _program_<?=id?>_global_work_offset_2;
+<? if kernelCallMethod == 'C-singlethread' then ?>
 
 typedef void * ffi_type;
 
@@ -2675,18 +2701,19 @@ end
 		num_groups_v[i] = 1
 	end
 --print'assigning globals...'
-	lib['_program_'..pid..'_work_dim'] = workDim
+	local globalinfo = lib['_program_'..pid..'_globalinfo']
+	globalinfo.work_dim = workDim
 	for n=0,clDeviceMaxWorkItemDimension-1 do
-		lib['_program_'..pid..'_local_size_'..n] = local_work_size_v[n+1]
-		lib['_program_'..pid..'_global_size_'..n] = global_work_size_v[n+1]
-		lib['_program_'..pid..'_num_groups_'..n] = num_groups_v[n+1]
+		globalinfo['local_size_'..n] = local_work_size_v[n+1]
+		globalinfo['global_size_'..n] = global_work_size_v[n+1]
+		globalinfo['num_groups_'..n] = num_groups_v[n+1]
 	end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
 	if kernelCallMethod == 'Lua' then
-		local info = lib['_program_'..pid..'_threadinfo']
+		local threadinfo = lib['_program_'..pid..'_threadinfo']
 
-		info[0].global_linear_id = 0
+		threadinfo[0].global_linear_id = 0
 		local is = {}
 		for i=0,global_work_size_v[1]-1 do
 			for j=0,global_work_size_v[2]-1 do
@@ -2696,12 +2723,12 @@ end
 					is[2]=j 
 					is[3]=k
 					for n=1,clDeviceMaxWorkItemDimension  do
-						info[0].local_id[n-1] = is[n] % local_work_size_v[n]
-						info[0].group_id[n-1] = is[n] / local_work_size_v[n]
-						info[0].global_id[n-1] = is[n] + global_work_offset_v[n]
+						threadinfo[0].local_id[n-1] = is[n] % local_work_size_v[n]
+						threadinfo[0].group_id[n-1] = is[n] / local_work_size_v[n]
+						threadinfo[0].global_id[n-1] = is[n] + global_work_offset_v[n]
 					end
 
-					info[0].local_linear_id = 
+					threadinfo[0].local_linear_id = 
 						is[1] + local_work_size_v[1] * (
 							is[2] + local_work_size_v[2] * (
 								is[3]
@@ -2714,21 +2741,21 @@ end
 					-- but this would mean replacing all functions and their prototypes in the C code with empty-args, and then inserting code in the function beginning to copy from these global vars into the function local vars ...
 					kernel.func(table.unpack(dstargs, 1, kernel.numargs))
 				
-					info[0].global_linear_id = info[0].global_linear_id + 1
+					threadinfo[0].global_linear_id = threadinfo[0].global_linear_id + 1
 				end
 			end
 		end
 	elseif kernelCallMethod == 'C-singlethread' then
 		for n=0,clDeviceMaxWorkItemDimension-1 do
 			if kernelCallMethod == 'C-singlethread' then
-				lib['_program_'..pid..'_global_work_offset_'..n] = global_work_offset_v[n+1]
+				globalinfo['global_work_offset_'..n] = global_work_offset_v[n+1]
 			end
 		end
 		lib.executeKernelSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	else
 		for n=0,clDeviceMaxWorkItemDimension-1 do
 			if kernelCallMethod == 'C-singlethread' then
-				lib['_program_'..pid..'_global_work_offset_'..n] = global_work_offset_v[n+1]
+				globalinfo['global_work_offset_'..n] = global_work_offset_v[n+1]
 			end
 		end
 		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async

@@ -9,24 +9,26 @@ extern "C" {
 // that means I'll have to lua-template this to replace the <?=id?>'s with the program id
 // so can I gcc it into an obj and g++ this into an obj and link fine into a lib?
 
-extern uint _program_<?=id?>_work_dim;
+typedef struct {
+	uint work_dim;
 
-extern size_t _program_<?=id?>_global_size_0;
-extern size_t _program_<?=id?>_global_size_1;
-extern size_t _program_<?=id?>_global_size_2;
+	size_t global_size_0;
+	size_t global_size_1;
+	size_t global_size_2;
 
-extern size_t _program_<?=id?>_local_size_0;
-extern size_t _program_<?=id?>_local_size_1;
-extern size_t _program_<?=id?>_local_size_2;
+	size_t local_size_0;
+	size_t local_size_1;
+	size_t local_size_2;
 
-extern size_t _program_<?=id?>_num_groups_0;
-extern size_t _program_<?=id?>_num_groups_1;
-extern size_t _program_<?=id?>_num_groups_2;
+	size_t num_groups_0;
+	size_t num_groups_1;
+	size_t num_groups_2;
 
-extern size_t _program_<?=id?>_global_work_offset_0;
-extern size_t _program_<?=id?>_global_work_offset_1;
-extern size_t _program_<?=id?>_global_work_offset_2;
-
+	size_t global_work_offset_0;
+	size_t global_work_offset_1;
+	size_t global_work_offset_2;
+} cl_globalinfo_t;
+extern cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 //unlike the singlethread implementation, 
 // the multithread implementation needs a unique one of these per-thread.
@@ -45,43 +47,45 @@ void executeKernelMultiThread(
 	void (*func)(),
 	void ** values
 ) {
+	cl_globalinfo_t * globalinfo = &_program_<?=id?>_globalinfo;
+
 	static std::vector<size_t> cpuids;
 	std::itoa(cpuids.begin(), cpuids.end(), 0);
 	std::vector<std::future<bool>> handles(<?=numcores?>);
 
-	size_t size = _program_<?=id?>_global_size_0
-		* _program_<?=id?>_global_size_1
-		* _program_<?=id?>_global_size_2;
+	size_t size = globalinfo->global_size_0
+		* globalinfo->global_size_1
+		* globalinfo->global_size_2;
 
 	for (size_t coreid = 0; coreid < <?=numcores?>; ++coreid) {
 		handles[coreid] = std::async(std::launch::async,
-			[coreid](size_t coreid) -> bool {
-				auto * info = _program_<?=id?>_threadinfo + coreid;
+			[coreid, globalinfo](size_t coreid) -> bool {
+				cl_globalinfo_t * threadinfo = _program_<?=id?>_threadinfo + coreid;
 				size_t ibegin = size*coreid/<?=numcores?>;
 				size_t iend = size*(coreid+1)/<?=numcores?>;
 
 				for (size_t i = ibegin; i < iend; ++i) {
-					info->global_linear_id = i;
+					threadinfo->global_linear_id = i;
 				
-					size_t i_0 = i % _program_<?=id?>_global_size_0;
-					info->local_id[0] = i_0 % _program_<?=id?>_local_size_0;
-					info->group_id[0] = i_0 / _program_<?=id?>_local_size_0;
-					info->group_id[0] = i_0 + _program_<?=id?>_global_work_offset_0;
+					size_t i_0 = i % globalinfo->global_size_0;
+					threadinfo->local_id[0] = i_0 % globalinfo->local_size_0;
+					threadinfo->group_id[0] = i_0 / globalinfo->local_size_0;
+					threadinfo->group_id[0] = i_0 + globalinfo->global_work_offset_0;
 					
-					size_t i_1 = (i / _program_<?=id?>_global_size_0) % _program_<?=id?>_global_size_1;
-					info->local_id[1] = i_1 % _program_<?=id?>_local_size_1;
-					info->group_id[1] = i_1 / _program_<?=id?>_local_size_1;
-					info->group_id[1] = i_1 + _program_<?=id?>_global_work_offset_1;
+					size_t i_1 = (i / globalinfo->global_size_0) % globalinfo->global_size_1;
+					threadinfo->local_id[1] = i_1 % globalinfo->local_size_1;
+					threadinfo->group_id[1] = i_1 / globalinfo->local_size_1;
+					threadinfo->group_id[1] = i_1 + globalinfo->global_work_offset_1;
 					
-					size_t i_2 = (i / _program_<?=id?>_global_size_0) / _program_<?=id?>_global_size_1;
-					info->local_id[2] = i_2 % _program_<?=id?>_local_size_2;
-					info->group_id[2] = i_2 / _program_<?=id?>_local_size_2;
-					info->group_id[2] = i_2 + _program_<?=id?>_global_work_offset_2;
+					size_t i_2 = (i / globalinfo->global_size_0) / globalinfo->global_size_1;
+					threadinfo->local_id[2] = i_2 % globalinfo->local_size_2;
+					threadinfo->group_id[2] = i_2 / globalinfo->local_size_2;
+					threadinfo->group_id[2] = i_2 + globalinfo->global_work_offset_2;
 				
-					info->local_linear_id = 
-						info->local_id[0] + _program_<?=id?>_local_size_0 * (
-							info->local_id[1] + _program_<?=id?>_local_size_1 * (
-								info->local_id[2]
+					threadinfo->local_linear_id = 
+						threadinfo->local_id[0] + globalinfo->local_size_0 * (
+							threadinfo->local_id[1] + globalinfo->local_size_1 * (
+								threadinfo->local_id[2]
 							)
 						)
 					;
