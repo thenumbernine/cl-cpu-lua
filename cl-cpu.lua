@@ -9,6 +9,15 @@ require 'ffi.c.stdlib'	-- rand()
 -- whether to verify each pointer passed into a function was an object we created
 local extraStrictVerification = true
 
+
+--local kernelCallMethod = 'Lua'
+local kernelCallMethod = 'C-singlethread'
+	
+if kernelCallMethod == 'C-singlethread' then
+	require 'ffi.ffi'	-- this is lib-ffi, not luajit-ffi
+end
+
+
 -- copied from ffi/OpenCL.lua
 ffi.cdef[[
 enum {
@@ -1699,9 +1708,100 @@ int4 int4_add(int4 a, int4 b) {
 	};
 }
 
+<? if kernelCallMethod == 'C-singlethread' then ?>
+
+EXTERN size_t _program_<?=id?>_global_work_offset_0 = 0;
+EXTERN size_t _program_<?=id?>_global_work_offset_1 = 0;
+EXTERN size_t _program_<?=id?>_global_work_offset_2 = 0;
+
+// needs to have ffi_type defined 
+typedef void * ffi_type;
+typedef void * ffi_cif;
+
+extern ffi_type ffi_type_void;
+void ffi_set_void(ffi_type ** const t) { t[0] = &ffi_type_void; }
+
+extern ffi_type ffi_type_pointer;
+void ffi_set_pointer(ffi_type ** const t) { t[0] = &ffi_type_pointer; }
+
+extern ffi_type ffi_type_sint32;
+void ffi_set_int(ffi_type ** const t) { t[0] = &ffi_type_sint32; }
+
+extern ffi_type ffi_type_float;
+void ffi_set_float(ffi_type ** const t) { t[0] = &ffi_type_float; }
+
+extern ffi_type ffi_type_double;
+void ffi_set_double(ffi_type ** const t) { t[0] = &ffi_type_double; }
+
+void executeKernelSingleThread(
+	ffi_cif * cif,
+	void (*func)(),
+	void ** values
+) {
+	size_t i_0 = 0;
+	for (
+		_program_<?=id?>_local_id_0 = 0,
+		_program_<?=id?>_group_id_0 = 0,
+		_program_<?=id?>_global_id_0 = _program_<?=id?>_global_work_offset_0;
+
+		i_0 < _program_<?=id?>_global_size_0;
+
+		++i_0,
+		++_program_<?=id?>_local_id_0,
+		++_program_<?=id?>_global_id_0
+	) {
+		if (_program_<?=id?>_local_id_0 == _program_<?=id?>_local_size_0) {
+			_program_<?=id?>_local_id_0 = 0;
+			++_program_<?=id?>_group_id_0;
+		}
+
+		size_t i_1 = 0;
+		for (
+			_program_<?=id?>_local_id_1 = 0,
+			_program_<?=id?>_group_id_1 = 0,
+			_program_<?=id?>_global_id_1 = _program_<?=id?>_global_work_offset_1;
+
+			i_1 < _program_<?=id?>_global_size_1;
+
+			++i_1,
+			++_program_<?=id?>_local_id_1,
+			++_program_<?=id?>_global_id_1
+		) {
+			if (_program_<?=id?>_local_id_1 == _program_<?=id?>_local_size_1) {
+				_program_<?=id?>_local_id_1 = 1;
+				++_program_<?=id?>_group_id_1;
+			}
+
+			size_t i_2 = 0;
+			for (
+				_program_<?=id?>_local_id_2 = 0,
+				_program_<?=id?>_group_id_2 = 0,
+				_program_<?=id?>_global_id_2 = _program_<?=id?>_global_work_offset_2;
+
+				i_2 < _program_<?=id?>_global_size_2;
+
+				++i_2,
+				++_program_<?=id?>_local_id_2,
+				++_program_<?=id?>_global_id_2
+			) {
+				if (_program_<?=id?>_local_id_2 == _program_<?=id?>_local_size_2) {
+					_program_<?=id?>_local_id_2 = 2;
+					++_program_<?=id?>_group_id_2;
+				}
+
+				void *tmpret;
+				ffi_call(cif, func, &tmpret, values);
+			}
+		}
+	}
+}
+
+<? end -- kernelCallMethod == 'C-singlethread' ?>
+
 ]], 	{
 			id = id,
 			vectorTypes = vectorTypes,
+			kernelCallMethod = kernelCallMethod,
 		}),
 	}
 	for i=0,tonumber(numStrings)-1 do
@@ -1808,6 +1908,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	program.status = ffi.C.CL_BUILD_IN_PROGRESS
 	program.options = nil
 
+	local headerCode
 	xpcall(function()
 		local result = gcc:compile(program.code)
 		if result.error then error(result.error) end
@@ -1815,7 +1916,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		
 		-- gcc:compile calls ffi.load
 		-- so these should now be available:
-		ffi.cdef(template([[
+		headerCode = template([[
 size_t _program_<?=id?>_global_id_0;
 size_t _program_<?=id?>_global_id_1;
 size_t _program_<?=id?>_global_id_2;
@@ -1835,7 +1936,37 @@ size_t _program_<?=id?>_local_size_2;
 size_t _program_<?=id?>_group_id_0;
 size_t _program_<?=id?>_group_id_1;
 size_t _program_<?=id?>_group_id_2;
-]], {id=id}))
+
+
+<? if kernelCallMethod == 'C-singlethread' then ?>
+
+size_t _program_<?=id?>_global_work_offset_0;
+size_t _program_<?=id?>_global_work_offset_1;
+size_t _program_<?=id?>_global_work_offset_2;
+
+typedef void * ffi_type;
+
+void ffi_set_void(ffi_type ** const);
+void ffi_set_pointer(ffi_type ** const);
+void ffi_set_int(ffi_type ** const);
+void ffi_set_float(ffi_type ** const);
+void ffi_set_double(ffi_type ** const);
+
+typedef void * ffi_cif;
+
+void executeKernelSingleThread(
+	ffi_cif * cif,
+	void (*func)(),
+	void ** values
+);
+
+<? end ?>
+
+]], 	{
+			id = id,
+			kernelCallMethod = kernelCallMethod,
+		})
+		ffi.cdef(headerCode)
 
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local lib = result.lib
@@ -1855,8 +1986,12 @@ size_t _program_<?=id?>_group_id_2;
 		program.options = options
 
 	end, function(err)
---print('error while compiling: '..err)
---print(debug.traceback())
+print('gcc code:')
+print(require 'template.showcode'(code))
+print('header code:')
+print(require 'template.showcode'(headerCode))
+print('error while compiling: '..err)
+print(debug.traceback())
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
@@ -1928,7 +2063,7 @@ local function removeCommentsAndApplyContinuations(code)
 	-- if so then do this here
 	-- or should they not?  then do this after.
 	repeat
-		local i, j = code:find('\\%s*\n')
+		local i, j = code:find('\\\n')
 		if not i then break end
 		code = code:sub(1,i-1)..' '..code:sub(j+1)
 	until false
@@ -2045,6 +2180,9 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		argInfo.origtype = tokens:concat' '
 		-- or not? idk that i need it -- I'll let the kernel code do the casting
 
+		-- remove consts
+		tokens = tokens:filter(function(t) return t ~= 'const' end)
+
 		-- ok now when deducing the link signature, there will be lots of struct ptrs - just convert them to void*
 		-- so if the 2nd-to-last is a * then replace all type tokens with 'void*'
 		if tokens:find'*' then
@@ -2093,6 +2231,53 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		handle = kernelHandle,		-- hold so luajit doesn't free
 		ctx = program.ctx,
 	}
+
+	-- if we're using C+FFI then setup the CIF here
+	if kernelCallMethod == 'C-singlethread' then
+		ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
+		kernel.ffi_atypes = ffi_atypes
+	
+		kernel.ffi_rtype = ffi.new('ffi_type*[1]')
+		local lib = program.lib
+		lib.ffi_set_void(kernel.ffi_rtype)	-- kernel always returns void
+		
+		kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
+		kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
+	
+		for i=1,kernel.numargs do
+			local argInfo = assert(argInfos[i])
+			if argInfo.isGlobal
+			or argInfo.isConstant
+			then
+				lib.ffi_set_pointer(ffi_atypes+i-1)
+			elseif argInfo.isLocal then
+				lib.ffi_set_pointer(ffi_atypes+i-1)
+			else
+				if argInfo.type == 'int' then
+					lib.ffi_set_int(ffi_atypes+i-1)
+				elseif argInfo.type == 'realparam' then
+					-- TODO translate from typedefs
+					-- (so far) only for isGlobal=false, isLocal=false, isConstant=false
+					-- TODO if realparam == float then
+					lib.ffi_set_float(ffi_atypes+i-1)
+					-- TODO elseif realparam == double then
+					lib.ffi_set_double(ffi_atypes+i-1)
+				else
+					error("don't know how to ffi set the type "..argInfo.type)
+				end
+			end
+		end
+			
+		kernel.ffi_cif = ffi.new('ffi_cif[1]')
+		if ffi.C.ffi_prep_cif(kernel.ffi_cif, ffi.C.FFI_DEFAULT_ABI, kernel.numargs, kernel.ffi_rtype[0], ffi_atypes) ~= ffi.C.FFI_OK then
+print("failed to prepare the FFI CIF")
+			errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE
+		end
+	
+		-- hmm, luajit can't pass C function pointers into C function pointer args of functions, so gotta make a closure even though I'm not wrapping a luajit function ...
+		kernel.func_closure = ffi.cast('void(*)()', kernel.func)
+	end
+
 	kernelsForID[kernelHandle[0].id] = kernel
 	
 	-- TODO what if the kernel was already requested?
@@ -2273,60 +2458,128 @@ end
 	local pid = program.id
 	local lib = program.lib
 	local srcargs = kernel.args
-	local dstargs = {}
 	local argInfos = kernel.argInfos
-	for i=1,kernel.numargs do
-		local argInfo = assert(argInfos[i])
-		local srcarg = srcargs[i]
-		if srcarg == nil then		-- arg was not specified
-			return ffi.C.CL_INVALID_KERNEL_ARGS
+	
+	-- used with kernelCallMethod == 'Lua'
+	local dstargs	
+	-- used with kernelCallMethod == 'C-singlethread'
+	local ffi_atypes
+	local ffi_rtype
+	local ffi_values
+	local ffi_ptrs	-- since most often values has to point to a pointer
+
+	if kernelCallMethod == 'Lua' then
+		dstargs = {}
+		for i=1,kernel.numargs do
+			local argInfo = assert(argInfos[i])
+			local srcarg = srcargs[i]
+			if srcarg == nil then		-- arg was not specified
+				return ffi.C.CL_INVALID_KERNEL_ARGS
+			end
+			local arg = srcarg.ptr
+			local size = srcarg.size
+	--print('arg '..i)
+	--print('type(arg)', type(arg))
+	--print('ffi.typeof(arg)', ffi.typeof(arg))
+	--print('argInfo.origtype', argInfo.origtype)
+	--print('argInfo.type', argInfo.type)
+			assert(type(arg) == 'cdata')
+			--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
+			assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer
+			
+			if argInfo.isGlobal
+			or argInfo.isConstant
+			then	-- assert we have a cl_mem ... same with local?
+	--print'isGlobal or isConstant'
+	--print('before cast', arg)
+				arg = ffi.cast('cl_mem*', arg)
+				if arg == nil then
+					error'here'
+				end
+				local _, err = memCastAndVerify(arg[0])
+				if err then
+					error'here'
+					return err
+				end
+	--print('after cast, arg', arg)
+	--print('after cast, arg[0]', arg[0])
+	--print('after cast, arg[0][0]', arg[0][0])
+	--print('after cast, arg[0][0].verify', arg[0][0].verify)
+				arg = arg[0][0].ptr
+			elseif argInfo.isLocal then
+	--print'isLocal'
+				-- use the pointer as-is
+				local localptr = srcarg.localptr
+				if not localptr then
+					localptr = ffi.new('uint8_t[?]', size)
+					srcarg.localptr = localptr
+				end
+				arg = localptr
+			else
+	--print'neither local nor global (prim?)'
+				arg = ffi.cast(argInfo.type..'*', arg)[0]
+			end
+	--print('arg value', arg)
+			dstargs[i] = arg
 		end
-		local arg = srcarg.ptr
-		local size = srcarg.size
---print('arg '..i)
---print('type(arg)', type(arg))
---print('ffi.typeof(arg)', ffi.typeof(arg))
---print('argInfo.origtype', argInfo.origtype)
---print('argInfo.type', argInfo.type)
-		assert(type(arg) == 'cdata')
-		--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
-		assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer
+	elseif kernelCallMethod == 'C-singlethread' then
+		ffi_atypes = kernel.ffi_atypes
+		ffi_rtype = kernel.ffi_rtype
+		ffi_values = kernel.ffi_values
+		ffi_ptrs = kernel.ffi_ptrs
 		
-		if argInfo.isGlobal
-		or argInfo.isConstant
-		then	-- assert we have a cl_mem ... same with local?
---print'isGlobal or isConstant'
---print('before cast', arg)
-			arg = ffi.cast('cl_mem*', arg)
-			if arg == nil then
-				error'here'
-			end
-			local _, err = memCastAndVerify(arg[0])
-			if err then
-				error'here'
-				return err
-			end
---print('after cast, arg', arg)
---print('after cast, arg[0]', arg[0])
---print('after cast, arg[0][0]', arg[0][0])
---print('after cast, arg[0][0].verify', arg[0][0].verify)
-			arg = arg[0][0].ptr
-		elseif argInfo.isLocal then
---print'isLocal'
-			-- use the pointer as-is
-			local localptr = srcarg.localptr
-			if not localptr then
-				localptr = ffi.new('uint8_t[?]', size)
-				srcarg.localptr = localptr
-			end
-			arg = localptr
-		else
---print'neither local nor global (prim?)'
-			arg = ffi.cast(argInfo.type..'*', arg)[0]
+		-- reset all values before assigning from what the user provided
+		-- TODO this could be skipped if value-setting was all done in clSetKernelArg
+		for i=0,kernel.numargs-1 do
+			ffi_values[i] = ffi_ptrs + i
 		end
---print('arg value', arg)
-		dstargs[i] = arg
+		
+		for i=1,kernel.numargs do
+			local argInfo = assert(argInfos[i])
+			--print('ARGINFOTYPE', argInfo.type, argInfo.isGlobal, argInfo.isConstant, argInfo.isLocal)
+			local srcarg = srcargs[i]
+			if srcarg == nil then		-- arg was not specified
+				return ffi.C.CL_INVALID_KERNEL_ARGS
+			end
+			local arg = srcarg.ptr
+			local size = srcarg.size
+			assert(type(arg) == 'cdata')
+			--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
+			assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer
+			
+			if argInfo.isGlobal
+			or argInfo.isConstant
+			then
+				arg = ffi.cast('cl_mem*', arg)
+				if arg == nil then
+					error'here'
+				end
+				local _, err = memCastAndVerify(arg[0])
+				if err then
+					error'here'
+					return err
+				end
+				
+				-- ffi says this should be a pointer-to-a-pointer
+				ffi_ptrs[i-1] = arg[0][0].ptr
+			elseif argInfo.isLocal then
+				-- use the pointer as-is
+				local localptr = srcarg.localptr
+				if not localptr then
+					localptr = ffi.new('uint8_t[?]', size)
+					srcarg.localptr = localptr
+				end
+				-- ffi says this should be a pointer-to-a-pointer
+				ffi_ptrs[i-1] = localptr
+			else
+				-- can't get pointers in luajit, not even to externs, bleh
+				-- so I have to wrap that in C code ...
+				-- then assign the values[i] to some alloc'd pointer holding it
+				ffi_values[i-1] = arg
+			end
+		end
 	end
+
 
 --print('calling...')
 	local global_work_offset_v = {}
@@ -2353,28 +2606,47 @@ end
 		local_id_fields[n+1] = '_program_'..pid..'_local_id_'..n
 		group_id_fields[n+1] = '_program_'..pid..'_group_id_'..n
 		global_id_fields[n+1] = '_program_'..pid..'_global_id_'..n
+		
+		if kernelCallMethod == 'C-singlethread' then
+			lib['_program_'..pid..'_global_work_offset_'..n] = global_work_offset_v[n+1]
+		end
 	end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
-	local is = {}
-	for i=0,global_work_size_v[1]-1 do
-		for j=0,global_work_size_v[2]-1 do
-			for k=0,global_work_size_v[3]-1 do
---print(i,j,k)
-				is[1]=i is[2]=j is[3]=k
-				for n=1,clDeviceMaxWorkItemDimension  do
-					lib[local_id_fields[n]] = is[n] % local_work_size_v[n]
---print(local_id_fields[n], lib[local_id_fields[n]])
-					lib[group_id_fields[n]] = is[n] / local_work_size_v[n]
---print(group_id_fields[n], lib[group_id_fields[n]])
-					lib[global_id_fields[n]] = is[n] + global_work_offset_v[n]
---print(global_id_fields[n], lib[global_id_fields[n]])
-				end
+	if kernelCallMethod == 'Lua' then
+		local is = {}
+		for i=0,global_work_size_v[1]-1 do
+			for j=0,global_work_size_v[2]-1 do
+				for k=0,global_work_size_v[3]-1 do
+	--print(i,j,k)
+					is[1]=i is[2]=j is[3]=k
+					for n=1,clDeviceMaxWorkItemDimension  do
+						lib[local_id_fields[n]] = is[n] % local_work_size_v[n]
+	--print(local_id_fields[n], lib[local_id_fields[n]])
+						lib[group_id_fields[n]] = is[n] / local_work_size_v[n]
+	--print(group_id_fields[n], lib[group_id_fields[n]])
+						lib[global_id_fields[n]] = is[n] + global_work_offset_v[n]
+	--print(global_id_fields[n], lib[global_id_fields[n]])
+					end
 
---io.write('('..table.concat(is, ', ')..') ')
-				kernel.func(table.unpack(dstargs, 1, kernel.numargs))
+	--io.write('('..table.concat(is, ', ')..') ')
+					-- TODO don't use real C function args, instead use globals with names associated with the kernel, i.e. <kernel>_arg<i>
+					-- and then immediately store them upon clSetKernelArg
+					-- but this would mean replacing all functions and their prototypes in the C code with empty-args, and then inserting code in the function beginning to copy from these global vars into the function local vars ... 
+					kernel.func(table.unpack(dstargs, 1, kernel.numargs))
+				end
 			end
 		end
+	elseif kernelCallMethod == 'C-singlethread' then
+		lib.executeKernelSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+	else
+		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async 
+		-- ... but how to forward / pass varargs?
+		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
+		-- also, if each kernel function call needs a different local_id, group_id, and global_id ...
+		-- ... I guess those need to be per-thread variables, so probably need to be replaced with a macro somehow and then stored in arguments of the C function?
+		kernelCallAsync(
+		)
 	end
 --print('clEnqueueNDRangeKernel done')
 	return ffi.C.CL_SUCCESS
@@ -2515,6 +2787,18 @@ cl.clGetEventProfilingInfo = makeGetter{
 		value = 0,
 	},
 }
+
+--[[ cleanup gcc libtmp on exit?
+-- TODO shouldn't the ffi-c do this?
+local GCWrapper = require 'ffi.gcwrapper.gcwrapper'
+cl.cleanup = class(GCWrapper{
+	gctype = 'cl_cpu_shutdown_t',
+	ctype = 'int',
+	release = function(ptr)
+		os.execute('rm libtmp*')
+	end,
+})()
+--]]
 
 setmetatable(cl, {__index=ffi.C})
 return cl
