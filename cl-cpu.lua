@@ -10,12 +10,45 @@ require 'ffi.c.stdlib'	-- rand()
 local extraStrictVerification = true
 
 
---local kernelCallMethod = 'Lua'
-local kernelCallMethod = 'C-singlethread'
-	
+local kernelCallMethod = 'Lua'
+--local kernelCallMethod = 'C-singlethread'
+
+
 if kernelCallMethod == 'C-singlethread' then
 	require 'ffi.ffi'	-- this is lib-ffi, not luajit-ffi
 end
+
+-- used for enumeration
+local ffi_arg_types = table{
+--[[ these are typedef'd to others
+	'uchar',
+	'schar',
+	'ushort',
+	'sshort',
+	'uint',
+	'sint',
+	'ulong',
+	'slong',
+--]]
+	-- [1] = C name, [2] = ffi name
+	{'uint8', 'uint8'},
+	{'sint8', 'sint8'},
+	{'uint16', 'uint16'},
+	{'sint16', 'sint16'},
+	{'uint32', 'uint32'},
+	{'sint32', 'sint32'},
+	{'uint64', 'uint64'},
+	{'sint64', 'sint64'},
+	{'float', 'float'},
+	{'double', 'double'},
+	{'long double', 'longdouble'},
+}
+
+-- these don't need enumeration for arg types
+local ffi_all_types = table(ffi_arg_types):append{
+	{'void', 'void'},
+	{'void*', 'pointer'},
+}
 
 
 -- copied from ffi/OpenCL.lua
@@ -1725,7 +1758,7 @@ extern ffi_type ffi_type_pointer;
 void ffi_set_pointer(ffi_type ** const t) { t[0] = &ffi_type_pointer; }
 
 extern ffi_type ffi_type_sint32;
-void ffi_set_int(ffi_type ** const t) { t[0] = &ffi_type_sint32; }
+void ffi_set_sint32(ffi_type ** const t) { t[0] = &ffi_type_sint32; }
 
 extern ffi_type ffi_type_float;
 void ffi_set_float(ffi_type ** const t) { t[0] = &ffi_type_float; }
@@ -1948,7 +1981,7 @@ typedef void * ffi_type;
 
 void ffi_set_void(ffi_type ** const);
 void ffi_set_pointer(ffi_type ** const);
-void ffi_set_int(ffi_type ** const);
+void ffi_set_sint32(ffi_type ** const);
 void ffi_set_float(ffi_type ** const);
 void ffi_set_double(ffi_type ** const);
 
@@ -2253,14 +2286,20 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 			elseif argInfo.isLocal then
 				lib.ffi_set_pointer(ffi_atypes+i-1)
 			else
-				if argInfo.type == 'int' then
-					lib.ffi_set_int(ffi_atypes+i-1)
-				elseif argInfo.type == 'realparam' then
-					-- TODO translate from typedefs
-					-- (so far) only for isGlobal=false, isLocal=false, isConstant=false
-					-- TODO if realparam == float then
+				-- TODO how to detect the type of the arg?
+				-- all the CL API cares about is the sizeof
+				-- FFI wants to know more details than that
+				-- but all I have from the CL code is the CL/C typename
+				-- which could be typedef'd
+				-- so I have to consult luajit's ffi for more info
+				-- TODO better way to do this?
+				local t = ffi.typeof(argInfo.type)
+
+				if t == ffi.typeof'int32_t' then
+					lib.ffi_set_sint32(ffi_atypes+i-1)
+				elseif t == ffi.typeof'float' then
 					lib.ffi_set_float(ffi_atypes+i-1)
-					-- TODO elseif realparam == double then
+				elseif t == ffi.typeof'double' then
 					lib.ffi_set_double(ffi_atypes+i-1)
 				else
 					error("don't know how to ffi set the type "..argInfo.type)
