@@ -1739,28 +1739,30 @@ EXTERN size_t _program_<?=id?>_num_groups_2 = 0;
 #define get_num_groups(n)	_program_<?=id?>_num_groups_##n
 
 
-// TODO the following need to know which core you're on:
+// everything in the following need to know which core you're on:
+typedef struct {
+	size_t global_linear_id;
+	size_t local_linear_id;
 
-EXTERN size_t _program_<?=id?>_global_linear_id[<?=numcores?>] = {0};
-#define get_global_linear_id() _program_<?=id?>_global_linear_id[0]
+	size_t global_id_0;
+	size_t global_id_1;
+	size_t global_id_2;
 
-EXTERN size_t _program_<?=id?>_local_linear_id[<?=numcores?>] = {0};
-#define get_local_linear_id() _program_<?=id?>_local_linear_id[0]
+	size_t local_id_0;
+	size_t local_id_1;
+	size_t local_id_2;
 
-EXTERN size_t _program_<?=id?>_global_id_0[<?=numcores?>] = {0};
-EXTERN size_t _program_<?=id?>_global_id_1[<?=numcores?>] = {0};
-EXTERN size_t _program_<?=id?>_global_id_2[<?=numcores?>] = {0};
-#define get_global_id(n)	_program_<?=id?>_global_id_##n[0]
+	size_t group_id_0;
+	size_t group_id_1;
+	size_t group_id_2;
+} cl_threadinfo_t;
+EXTERN cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
-EXTERN size_t _program_<?=id?>_local_id_0[<?=numcores?>] = {0};
-EXTERN size_t _program_<?=id?>_local_id_1[<?=numcores?>] = {0};
-EXTERN size_t _program_<?=id?>_local_id_2[<?=numcores?>] = {0};
-#define get_local_id(n)	_program_<?=id?>_local_id_##n[0]
-
-EXTERN size_t _program_<?=id?>_group_id_0[<?=numcores?>] = {0};
-EXTERN size_t _program_<?=id?>_group_id_1[<?=numcores?>] = {0};
-EXTERN size_t _program_<?=id?>_group_id_2[<?=numcores?>] = {0};
-#define get_group_id(n)	_program_<?=id?>_group_id_##n[0]
+#define get_global_linear_id() 	_program_<?=id?>_threadinfo[0].global_linear_id
+#define get_local_linear_id() 	_program_<?=id?>_threadinfo[0].local_linear_id
+#define get_global_id(n)		_program_<?=id?>_threadinfo[0].global_id_##n
+#define get_local_id(n)			_program_<?=id?>_threadinfo[0].local_id_##n
+#define get_group_id(n)			_program_<?=id?>_threadinfo[0].group_id_##n
 
 
 int4 int4_add(int4 a, int4 b) {
@@ -1792,64 +1794,65 @@ void executeKernelSingleThread(
 	void (*func)(),
 	void ** values
 ) {
-	_program_<?=id?>_global_linear_id[0] = 0;
+	cl_threadinfo_t * info = _program_<?=id?>_threadinfo;
+	info->global_linear_id = 0;
 
 	size_t i_0 = 0;
 	for (
-		_program_<?=id?>_local_id_0[0] = 0,
-		_program_<?=id?>_group_id_0[0] = 0,
-		_program_<?=id?>_global_id_0[0] = _program_<?=id?>_global_work_offset_0;
+		info->local_id_0 = 0,
+		info->group_id_0 = 0,
+		info->global_id_0 = _program_<?=id?>_global_work_offset_0;
 
 		i_0 < _program_<?=id?>_global_size_0;
 
 		++i_0,
-		++_program_<?=id?>_local_id_0[0],
-		++_program_<?=id?>_global_id_0[0]
+		++info->local_id_0,
+		++info->global_id_0
 	) {
-		if (_program_<?=id?>_local_id_0[0] == _program_<?=id?>_local_size_0) {
-			_program_<?=id?>_local_id_0[0] = 0;
-			++_program_<?=id?>_group_id_0[0];
+		if (info->local_id_0 == _program_<?=id?>_local_size_0) {
+			info->local_id_0 = 0;
+			++info->group_id_0;
 		}
 
 		size_t i_1 = 0;
 		for (
-			_program_<?=id?>_local_id_1[0] = 0,
-			_program_<?=id?>_group_id_1[0] = 0,
-			_program_<?=id?>_global_id_1[0] = _program_<?=id?>_global_work_offset_1;
+			info->local_id_1 = 0,
+			info->group_id_1 = 0,
+			info->global_id_1 = _program_<?=id?>_global_work_offset_1;
 
 			i_1 < _program_<?=id?>_global_size_1;
 
 			++i_1,
-			++_program_<?=id?>_local_id_1[0],
-			++_program_<?=id?>_global_id_1[0]
+			++info->local_id_1,
+			++info->global_id_1
 		) {
-			if (_program_<?=id?>_local_id_1[0] == _program_<?=id?>_local_size_1) {
-				_program_<?=id?>_local_id_1[0] = 0;
-				++_program_<?=id?>_group_id_1[0];
+			if (info->local_id_1 == _program_<?=id?>_local_size_1) {
+				info->local_id_1 = 0;
+				++info->group_id_1;
 			}
 
 			size_t i_2 = 0;
 			for (
-				_program_<?=id?>_local_id_2[0] = 0,
-				_program_<?=id?>_group_id_2[0] = 0,
-				_program_<?=id?>_global_id_2[0] = _program_<?=id?>_global_work_offset_2;
+				info->local_id_2 = 0,
+				info->group_id_2 = 0,
+				info->global_id_2 = _program_<?=id?>_global_work_offset_2;
 
 				i_2 < _program_<?=id?>_global_size_2;
 
 				++i_2,
-				++_program_<?=id?>_local_id_2[0],
-				++_program_<?=id?>_global_id_2[0],
-				++_program_<?=id?>_global_linear_id[0]
+				++info->local_id_2,
+				++info->global_id_2,
+				++info->global_linear_id
 			) {
-				if (_program_<?=id?>_local_id_2[0] == _program_<?=id?>_local_size_2) {
-					_program_<?=id?>_local_id_2[0] = 0;
-					++_program_<?=id?>_group_id_2[0];
+				if (info->local_id_2 == _program_<?=id?>_local_size_2) {
+					info->local_id_2 = 0;
+					++info->group_id_2;
 				}
 
-				_program_<?=id?>_local_linear_id[0] = 
-					_program_<?=id?>_local_id_0[0] + _program_<?=id?>_local_size_0 * (
-						_program_<?=id?>_local_id_1[0] + _program_<?=id?>_local_size_1 * (
-							_program_<?=id?>_local_id_2[0]
+				info->local_linear_id = 
+					info->local_id_0 + _program_<?=id?>_local_size_0 * (
+						info->local_id_1 + _program_<?=id?>_local_size_1 * (
+							info->local_id_2
 						)
 					)
 				;
@@ -1998,21 +2001,25 @@ size_t _program_<?=id?>_num_groups_0;
 size_t _program_<?=id?>_num_groups_1;
 size_t _program_<?=id?>_num_groups_2;
 
-size_t _program_<?=id?>_global_linear_id[<?=numcores?>];
 
-size_t _program_<?=id?>_local_linear_id[<?=numcores?>];
+// everything in the following need to know which core you're on:
+typedef struct {
+	size_t global_linear_id;
+	size_t local_linear_id;
 
-size_t _program_<?=id?>_global_id_0[<?=numcores?>];
-size_t _program_<?=id?>_global_id_1[<?=numcores?>];
-size_t _program_<?=id?>_global_id_2[<?=numcores?>];
+	size_t global_id_0;
+	size_t global_id_1;
+	size_t global_id_2;
 
-size_t _program_<?=id?>_local_id_0[<?=numcores?>];
-size_t _program_<?=id?>_local_id_1[<?=numcores?>];
-size_t _program_<?=id?>_local_id_2[<?=numcores?>];
+	size_t local_id_0;
+	size_t local_id_1;
+	size_t local_id_2;
 
-size_t _program_<?=id?>_group_id_0[<?=numcores?>];
-size_t _program_<?=id?>_group_id_1[<?=numcores?>];
-size_t _program_<?=id?>_group_id_2[<?=numcores?>];
+	size_t group_id_0;
+	size_t group_id_1;
+	size_t group_id_2;
+} cl_threadinfo_t;
+cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 
 <? if kernelCallMethod == 'C-singlethread' then ?>
@@ -2691,18 +2698,9 @@ end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
 	if kernelCallMethod == 'Lua' then
-		local global_linear_id_ptr = lib['_program_'..pid..'_global_linear_id']
-		local local_linear_id_ptr = lib['_program_'..pid..'_local_linear_id']
-		local local_id_ptrs = {}
-		local  group_id_ptrs = {}
-		local global_id_ptrs = {}
-		for n=0,clDeviceMaxWorkItemDimension-1 do
-			local_id_ptrs[n+1] = lib['_program_'..pid..'_local_id_'..n]
-			group_id_ptrs[n+1] = lib['_program_'..pid..'_group_id_'..n]
-			global_id_ptrs[n+1] = lib['_program_'..pid..'_global_id_'..n]
-		end	
-		
-		global_linear_id_ptr[0] = 0
+		local info = lib['_program_'..pid..'_threadinfo']
+
+		info[0].global_linear_id = 0
 		local is = {}
 		for i=0,global_work_size_v[1]-1 do
 			for j=0,global_work_size_v[2]-1 do
@@ -2712,15 +2710,12 @@ end
 					is[2]=j 
 					is[3]=k
 					for n=1,clDeviceMaxWorkItemDimension  do
-						local_id_ptrs[n][0] = is[n] % local_work_size_v[n]
---print(local_id_ptrs[n][0])
-						group_id_ptrs[n][0] = is[n] / local_work_size_v[n]
---print(group_id_ptrs[n][0])
-						global_id_ptrs[n][0] = is[n] + global_work_offset_v[n]
---print(global_id_ptrs[n][0])
+						info[0]['local_id_'..(n-1)] = is[n] % local_work_size_v[n]
+						info[0]['group_id_'..(n-1)] = is[n] / local_work_size_v[n]
+						info[0]['global_id_'..(n-1)] = is[n] + global_work_offset_v[n]
 					end
 
-					local_linear_id_ptr[0] = 
+					info[0].local_linear_id = 
 						is[1] + local_work_size_v[1] * (
 							is[2] + local_work_size_v[2] * (
 								is[3]
@@ -2733,7 +2728,7 @@ end
 					-- but this would mean replacing all functions and their prototypes in the C code with empty-args, and then inserting code in the function beginning to copy from these global vars into the function local vars ...
 					kernel.func(table.unpack(dstargs, 1, kernel.numargs))
 				
-					global_linear_id_ptr[0] = global_linear_id_ptr[0] + 1
+					info[0].global_linear_id = info[0].global_linear_id + 1
 				end
 			end
 		end
