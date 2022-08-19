@@ -36,6 +36,8 @@ extern cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 #include <vector>
 #include <numeric>	//iota
 #include <future>
+#include <map>
+#include <thread>
 
 #include <ffi.h>
 
@@ -44,6 +46,27 @@ extern "C" void _program_<?=id?>_execSingleThread(
 	void (*func)(),
 	void ** values
 );
+
+static std::map<std::thread::id, size_t> threadIndexForID;
+static std::mutex threadIndexForIDMutex;
+
+#include <iostream>
+
+extern "C" size_t _program_<?=id?>_currentthreadindex() {
+//std::cout << "looking up thread id " << std::this_thread::get_id() << std::endl;
+	std::lock_guard<std::mutex> lg(threadIndexForIDMutex);
+	auto i = threadIndexForID.find(std::this_thread::get_id());
+	if (i == threadIndexForID.end()) {
+//std::cout << "...found nothing for thread id " << std::this_thread::get_id() << std::endl;
+std::cerr << "tried to get the id of a thread I wasn't using: " << std::this_thread::get_id() << std::endl;
+std::cerr.flush();
+exit(1);
+//		throw std::runtime_error("tried to get the id of a thread I wasn't using");
+		return 0;
+	}
+//std::cout << "...found " << i->second << std::endl;
+	return i->second;
+}
 
 extern "C" void _program_<?=id?>_execMultiThread(
 	ffi_cif * cif,
@@ -63,9 +86,17 @@ extern "C" void _program_<?=id?>_execMultiThread(
 		* globalinfo->global_size[1]
 		* globalinfo->global_size[2];
 
+	{
+		std::lock_guard<std::mutex> lg(threadIndexForIDMutex);
+		threadIndexForID.clear();
+	}
 	for (size_t coreid = 0; coreid < <?=numcores?>; ++coreid) {
 		handles[coreid] = std::async(std::launch::async,
 			[size, globalinfo, cif, func, values](size_t coreid) -> bool {
+				{
+					std::lock_guard<std::mutex> lg(threadIndexForIDMutex);
+					threadIndexForID[std::this_thread::get_id()] = coreid;
+				}
 				cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo + coreid;
 				size_t ibegin = size * coreid / <?=numcores?>;
 				size_t iend = size * (coreid+1) / <?=numcores?>;

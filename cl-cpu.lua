@@ -65,6 +65,9 @@ end
 local numcores = 1
 if kernelCallMethod == 'C-multithread' then
 	-- TODO get numcores from hardware_concurrency
+	require 'ffi.c.sys.sysinfo'
+	numcores = tonumber(ffi.C.get_nprocs())
+	print('using '..numcores..' cores')
 end
 
 
@@ -1482,6 +1485,7 @@ end
 local gcc = require 'ffi-c.c'
 -- c++ fails on field initialization
 --local gcc = require 'ffi-c.cpp'
+
 
 function gcc:addExtraObjFiles(objfiles, result)
 	if kernelCallMethod == 'C-multithread' then

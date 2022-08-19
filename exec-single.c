@@ -111,11 +111,18 @@ typedef struct {
 } cl_threadinfo_t;
 EXPORT cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
-#define get_global_linear_id() 	_program_<?=id?>_threadinfo[0].global_linear_id
-#define get_local_linear_id() 	_program_<?=id?>_threadinfo[0].local_linear_id
-#define get_global_id(n)		_program_<?=id?>_threadinfo[0].global_id[n]
-#define get_local_id(n)			_program_<?=id?>_threadinfo[0].local_id[n]
-#define get_group_id(n)			_program_<?=id?>_threadinfo[0].group_id[n]
+
+<? if kernelCallMethod == 'C-multithread' then ?>
+extern size_t _program_<?=id?>_currentthreadindex();
+<? else ?>
+#define _program_<?=id?>_currentthreadindex()	0
+<? end ?>
+
+#define get_global_linear_id() 	_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].global_linear_id
+#define get_local_linear_id() 	_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].local_linear_id
+#define get_global_id(n)		_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].global_id[n]
+#define get_local_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].local_id[n]
+#define get_group_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].group_id[n]
 
 
 static int4 int4_add(int4 a, int4 b) {
