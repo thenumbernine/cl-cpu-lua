@@ -86,24 +86,19 @@ typedef struct {
 	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-<?
-if kernelCallMethod == 'C-singlethread'
-or kernelCallMethod == 'C-multithread'
-then 
-?>
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-<? end ?>
 } cl_globalinfo_t;
 EXPORT cl_globalinfo_t _program_<?=id?>_globalinfo;
 
-#define get_work_dim()	_program_<?=id?>_globalinfo.work_dim
+#define get_work_dim()		_program_<?=id?>_globalinfo.work_dim
 #define get_global_size(n)	_program_<?=id?>_globalinfo.global_size[n]
 #define get_local_size(n)	_program_<?=id?>_globalinfo.local_size[n]
 
 //this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
 #define get_enqueued_local_size(n)	_program_<?=id?>_globalinfo.local_size[n]
 
-#define get_num_groups(n)	_program_<?=id?>_globalinfo.num_groups[n]
+#define get_num_groups(n)		_program_<?=id?>_globalinfo.num_groups[n]
+#define get_global_offset(n)	_program_<?=id?>_global_work_offset[n]
 
 
 // everything in the following need to know which core you're on:
@@ -147,6 +142,7 @@ then
 ?>void ffi_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
 <? end ?>
 
+
 void _program_<?=id?>_execSingleThread(
 	ffi_cif * cif,
 	void (*func)(),
@@ -154,6 +150,7 @@ void _program_<?=id?>_execSingleThread(
 ) {
 	cl_globalinfo_t * globalinfo = &_program_<?=id?>_globalinfo;
 	cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo;
+
 	threadinfo->global_linear_id = 0;
 
 	size_t is[<?=clDeviceMaxWorkItemDimension?>];
@@ -204,7 +201,7 @@ void _program_<?=id?>_execSingleThread(
 				++threadinfo->local_id[2],
 				++threadinfo->global_id[2],
 				++threadinfo->global_linear_id
-			) {
+			) {			
 				if (threadinfo->local_id[2] == globalinfo->local_size[2]) {
 					threadinfo->local_id[2] = 0;
 					++threadinfo->group_id[2];
@@ -218,10 +215,13 @@ void _program_<?=id?>_execSingleThread(
 					)
 				;
 
+
 				void *tmpret;
 				ffi_call(cif, func, &tmpret, values);
 			}
 		}
 	}
 }
+
+
 <? end -- kernelCallMethod == 'C-singlethread' ?>

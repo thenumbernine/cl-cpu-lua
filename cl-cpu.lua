@@ -20,8 +20,8 @@ local extraStrictVerification = true
 local kernelCallMethod = 'C-multithread'
 
 
-if kernelCallMethod == 'C-singlethread' 
-or kernelCallMethod == 'C-multithread' 
+if kernelCallMethod == 'C-singlethread'
+or kernelCallMethod == 'C-multithread'
 then
 	require 'ffi.ffi'	-- this is lib-ffi, not luajit-ffi
 end
@@ -1487,22 +1487,23 @@ function gcc:addExtraObjFiles(objfiles, result)
 	if kernelCallMethod == 'C-multithread' then
 	
 		local libIndex = #self.libfiles
-		local name = 'libtmp-'..self.cobjIndex..'-'..libIndex..'-multi'
+		local name = 'libtmp_'..self.cobjIndex..'_'..libIndex..'_multi'
 		
 		local pushcompiler = self.env.compiler
 		local pushcppver = self.env.cppver
---		self.env.compiler = 'g++'
---		self.env.cppver = 'c++17'
+		self.env.compiler = 'g++'
+		self.env.cppver = 'c++17'
 	
 		local srcsrcfile = pathToCLCPU..'/exec-multi.cpp'
-		local srcfile = name..'.c'
+		local srcfile = name..'.cpp'
 		local objfile = name..self.env.objSuffix
 		
 		-- generate the file from the templated file
 		file[srcfile] = template(file[srcsrcfile], {
+			id = self.currentProgramID,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-			id = self.currentProgramID,
+			ffi_all_types = ffi_all_types,
 		})
 		
 		self.env.objLogFile = name..'-obj.log'	-- what's this for again?
@@ -1716,6 +1717,15 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 		return 'i = int4_add(i,_int4('..inside..'))'
 	end)
 
+	-- replace #pragma OPENCL with comments
+	code = string.split(code, '\n'):mapi(function(l)
+		if l:lower():match'^#%s*pragma%s+opencl' then
+			return '// '..l
+		else
+			return l
+		end
+	end):concat'\n'
+
 	programsForID[id] = {
 		id = id,
 		handle = programHandle,
@@ -1814,13 +1824,7 @@ typedef struct {
 	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-<?
-if kernelCallMethod == 'C-singlethread'
-or kernelCallMethod == 'C-multithread'
-then
-?>
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-<? end ?>
 } cl_globalinfo_t;
 cl_globalinfo_t _program_<?=id?>_globalinfo;
 
@@ -1829,7 +1833,6 @@ cl_globalinfo_t _program_<?=id?>_globalinfo;
 typedef struct {
 	size_t global_linear_id;
 	size_t local_linear_id;
-
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
@@ -1839,8 +1842,8 @@ cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 
 <? 
-if kernelCallMethod == 'C-singlethread' 
-or kernelCallMethod == 'C-multithread' 
+if kernelCallMethod == 'C-singlethread'
+or kernelCallMethod == 'C-multithread'
 then 
 ?>
 
@@ -2147,8 +2150,8 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	}
 
 	-- if we're using C+FFI then setup the CIF here
-	if kernelCallMethod == 'C-singlethread' 
-	or kernelCallMethod == 'C-multithread' 
+	if kernelCallMethod == 'C-singlethread'
+	or kernelCallMethod == 'C-multithread'
 	then
 		local ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
 		kernel.ffi_atypes = ffi_atypes
@@ -2186,7 +2189,7 @@ print("couldn't find setter for type "..k)
 				end
 			end
 		end
-			
+		
 		kernel.ffi_cif = ffi.new('ffi_cif[1]')
 		if ffi.C.ffi_prep_cif(kernel.ffi_cif, ffi.C.FFI_DEFAULT_ABI, kernel.numargs, kernel.ffi_rtype[0], ffi_atypes) ~= ffi.C.FFI_OK then
 print("failed to prepare the FFI CIF")
@@ -2435,8 +2438,8 @@ end
 	--print('arg value', arg)
 			dstargs[i] = arg
 		end
-	elseif kernelCallMethod == 'C-singlethread' 
-	or kernelCallMethod == 'C-multithread' 
+	elseif kernelCallMethod == 'C-singlethread'
+	or kernelCallMethod == 'C-multithread'
 	then
 		-- used with kernelCallMethod == 'C-singlethread' or 'C-multithread'
 		-- since most often values has to point to a pointer
@@ -2520,6 +2523,7 @@ end
 		globalinfo.local_size[n] = local_work_size_v[n+1]
 		globalinfo.global_size[n] = global_work_size_v[n+1]
 		globalinfo.num_groups[n] = num_groups_v[n+1]
+		globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 	end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
@@ -2538,7 +2542,7 @@ end
 					for n=1,clDeviceMaxWorkItemDimension  do
 						threadinfo[0].local_id[n-1] = is[n] % local_work_size_v[n]
 						threadinfo[0].group_id[n-1] = is[n] / local_work_size_v[n]
-						threadinfo[0].global_id[n-1] = is[n] + global_work_offset_v[n]
+						threadinfo[0].global_id[n-1] = is[n] + globalinfo.global_work_offset[n-1]
 					end
 
 					threadinfo[0].local_linear_id =
@@ -2559,14 +2563,8 @@ end
 			end
 		end
 	elseif kernelCallMethod == 'C-singlethread' then
-		for n=0,clDeviceMaxWorkItemDimension-1 do
-			globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
-		end
 		lib['_program_'..program.id..'_execSingleThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	elseif kernelCallMethod == 'C-multithread' then
-		for n=0,clDeviceMaxWorkItemDimension-1 do
-			globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
-		end
 		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async
 		-- ... but how to forward / pass varargs?
 		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
