@@ -123,7 +123,7 @@ EXPORT cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 #define get_group_id(n)			_program_<?=id?>_threadinfo[0].group_id[n]
 
 
-int4 int4_add(int4 a, int4 b) {
+static int4 int4_add(int4 a, int4 b) {
 	return (int4){
 		.x = a.x + b.x,
 		.y = a.y + b.y,
