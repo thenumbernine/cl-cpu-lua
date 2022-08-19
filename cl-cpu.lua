@@ -1492,7 +1492,26 @@ function gcc:addExtraObjFiles(objfiles, result)
 		local pushcompiler = self.env.compiler
 		local pushcppver = self.env.cppver
 		self.env.compiler = 'g++'
+		
+		-- TODO this has to be done before postConfig()
+		-- or else it won't get baked into the compileFlags
+		-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
 		self.env.cppver = 'c++17'
+		-- so just do this
+		local pushcflags = self.env.compileFlags
+		self.env.compileFlags = self.env.compileFlags:gsub('std=c11', 'std=c++17')
+
+		-- I could use templates
+		-- I was using templates
+		-- but I need to pass the values through into the included file where the cl-cpu structs are
+		-- and I can't do that with templates (unless I further inline-and-template)
+		-- so instead I'll use macros
+		local nmacros = #self.env.macros
+		--self.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
+		--self.env.macros:insert('CLCPU_NUMCORES='..numcores)
+		-- on second thought, I can't use macros in the luajit ffi.cdef
+		-- so for that i'd have to replace stuff anyways
+		-- so meh might as well just use templates
 	
 		local srcsrcfile = pathToCLCPU..'/exec-multi.cpp'
 		local srcfile = name..'.cpp'
@@ -1516,9 +1535,12 @@ function gcc:addExtraObjFiles(objfiles, result)
 		end
 
 		objfiles:insert(objfile)
+		
+		self.env.macros =self.env.macros:sub(1, nmacros)
 
 		self.env.compiler = pushcompiler
 		self.env.cppver = pushcppver
+		self.env.compileFlags = pushcflags 
 	end
 end
 
