@@ -10,12 +10,12 @@ if ffi.os == 'Windows' then
 #define __attribute__(x)
 
 //I hate Windows
-#define EXTERN __declspec(dllexport)
-#define kernel EXTERN
+#define EXPORT __declspec(dllexport)
+#define kernel EXPORT
 
 <? else ?>
 
-#define EXTERN
+#define EXPORT
 #define kernel
 
 <?
@@ -94,7 +94,7 @@ then
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 <? end ?>
 } cl_globalinfo_t;
-EXTERN cl_globalinfo_t _program_<?=id?>_globalinfo;
+EXPORT cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 #define get_work_dim()	_program_<?=id?>_globalinfo.work_dim
 #define get_global_size(n)	_program_<?=id?>_globalinfo.global_size[n]
@@ -114,7 +114,7 @@ typedef struct {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
-EXTERN cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
+EXPORT cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 #define get_global_linear_id() 	_program_<?=id?>_threadinfo[0].global_linear_id
 #define get_local_linear_id() 	_program_<?=id?>_threadinfo[0].local_linear_id
@@ -147,7 +147,7 @@ then
 ?>void ffi_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
 <? end ?>
 
-void executeKernelSingleThread(
+void _program_<?=id?>_execSingleThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values

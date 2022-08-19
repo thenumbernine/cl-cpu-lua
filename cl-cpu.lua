@@ -1485,14 +1485,14 @@ local gcc = require 'ffi-c.c'
 
 function gcc:addExtraObjFiles(objfiles, result)
 	if kernelCallMethod == 'C-multithread' then
-		
+	
 		local libIndex = #self.libfiles
 		local name = 'libtmp-'..self.cobjIndex..'-'..libIndex..'-multi'
 		
 		local pushcompiler = self.env.compiler
-		local pushlinker = self.env.linker
+		local pushcppver = self.env.cppver
 --		self.env.compiler = 'g++'
---		self.env.linker = 'g++'
+--		self.env.cppver = 'c++17'
 	
 		local srcsrcfile = pathToCLCPU..'/exec-multi.cpp'
 		local srcfile = name..'.c'
@@ -1505,7 +1505,7 @@ function gcc:addExtraObjFiles(objfiles, result)
 			id = self.currentProgramID,
 		})
 		
-		self.env.objLogFile = name..'-obj-multi.log'	-- what's this for again?
+		self.env.objLogFile = name..'-obj.log'	-- what's this for again?
 		local status, compileLog = self.env:buildObj(objfile, srcfile) 	-- TODO allow capture output log
 		result.compileLog = result.compileLog..compileLog
 		if not status then
@@ -1514,10 +1514,10 @@ function gcc:addExtraObjFiles(objfiles, result)
 			--return result
 		end
 
-		objfiles:insert(1, objfile)
+		objfiles:insert(objfile)
 
 		self.env.compiler = pushcompiler
-		self.env.linker = pushlinker
+		self.env.cppver = pushcppver
 	end
 end
 
@@ -1844,15 +1844,15 @@ or kernelCallMethod == 'C-multithread'
 then 
 ?>
 
-typedef void * ffi_type;
+typedef struct ffi_type;
 
 <? for _,f in ipairs(ffi_all_types) do ?>
 void ffi_set_<?=f[2]?>(ffi_type ** const);
 <? end ?>
 
-typedef void * ffi_cif;
+typedef struct ffi_cif;
 
-void executeKernelSingleThread(
+void _program_<?=id?>_execSingleThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values
@@ -1860,7 +1860,7 @@ void executeKernelSingleThread(
 
 <? if kernelCallMethod == 'C-multithread' then ?>
 
-void executeKernelMultiThread(
+void _program_<?=id?>_execMultiThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values
@@ -2562,7 +2562,7 @@ end
 		for n=0,clDeviceMaxWorkItemDimension-1 do
 			globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 		end
-		lib.executeKernelSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+		lib['_program_'..program.id..'_execSingleThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	elseif kernelCallMethod == 'C-multithread' then
 		for n=0,clDeviceMaxWorkItemDimension-1 do
 			globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
@@ -2572,8 +2572,8 @@ end
 		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
 		-- also, if each kernel function call needs a different local_id, group_id, and global_id ...
 		-- ... I guess those need to be per-thread variables, so probably need to be replaced with a macro somehow and then stored in arguments of the C function?
-		lib.executeKernelMultiThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
-		--lib.executeKernelSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+		lib['_program_'..program.id..'_execMultiThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+		--lib['_program_'..program.id..'_execSingleThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	else
 		error("unknown kernelCallMethod "..tostring(kernelCallMethod))
 	end

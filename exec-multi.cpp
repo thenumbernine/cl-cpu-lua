@@ -35,7 +35,8 @@ typedef struct {
 } cl_threadinfo_t;
 extern cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
-void executeKernelMultiThread(
+
+void _program_<?=id?>_execMultiThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values
