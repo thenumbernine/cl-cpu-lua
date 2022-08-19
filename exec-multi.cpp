@@ -2,13 +2,13 @@
 // but instead I'm just going to use std::async
 
 #include <ffi.h>
-#include <vector>
-#include <numeric>	//iota
-#include <future>
+//#include <vector>
+//#include <numeric>	//iota
+//#include <future>
+
+//extern "C" {
 
 typedef unsigned int uint;
-
-extern "C" {
 
 //these globals should be in the cl kernel program's obj
 // that means I'll have to lua-template this to replace the <?=id?>'s with the program id
@@ -21,8 +21,7 @@ typedef struct {
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
-#define GLOBALINFO	_program_<?=id?>_globalinfo
-extern cl_globalinfo_t GLOBALINFO;
+extern cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 //unlike the singlethread implementation, 
 // the multithread implementation needs a unique one of these per-thread.
@@ -34,8 +33,7 @@ typedef struct {
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
-#define THREADINFO	_program_<?=id?>_threadinfo
-extern cl_threadinfo_t THREADINFO[<?=numcores?>];
+extern cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 void executeKernelMultiThread(
 	ffi_cif * cif,
@@ -115,7 +113,7 @@ void executeKernelMultiThread(
 		}
 	}
 #else	//multithread
-	cl_globalinfo_t * globalinfo = &GLOBALINFO;
+	cl_globalinfo_t * globalinfo = &_program_<?=id?>_globalinfo;
 
 	static std::vector<size_t> cpuids;
 	std::iota(cpuids.begin(), cpuids.end(), 0);
@@ -128,7 +126,7 @@ void executeKernelMultiThread(
 	for (size_t coreid = 0; coreid < <?=numcores?>; ++coreid) {
 		handles[coreid] = std::async(std::launch::async,
 			[size, globalinfo, cif, func, values](size_t coreid) -> bool {
-				cl_threadinfo_t * threadinfo = THREADINFO + coreid;
+				cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo + coreid;
 				size_t ibegin = size * coreid / <?=numcores?>;
 				size_t iend = size * (coreid+1) / <?=numcores?>;
 
@@ -172,4 +170,4 @@ void executeKernelMultiThread(
 #endif
 }
 
-}
+//}
