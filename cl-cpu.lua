@@ -8,8 +8,11 @@ local template = require 'template'
 require 'ffi.c.stdlib'	-- rand()
 
 
--- TODO determine path ... based on cl-cpu's launched location?
-local pathToCLCPU = '../cl-cpu'
+
+local cl = {}
+
+-- this is written in cl-cpu/run.lua immediately after loading cl-cpu/cl-cpu.lua
+cl.pathToCLCPU = '.'
 
 -- whether to verify each pointer passed into a function was an object we created
 local extraStrictVerification = true
@@ -634,8 +637,6 @@ struct _cl_kernel {
 };
 
 ]]
-
-local cl = {}
 
 -- id is usually a cl_* which is typedef'd to a struct _cl_* *, so it's essentially a void*
 -- cl_*_info name ... cl_*_info is always uint32, except cl_device_address_info, which is a cl_bitfield, which is a uint64
@@ -1517,7 +1518,7 @@ function gcc:addExtraObjFiles(objfiles, result)
 		-- so for that i'd have to replace stuff anyways
 		-- so meh might as well just use templates
 	
-		local srcsrcfile = pathToCLCPU..'/exec-multi.cpp'
+		local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
 		local srcfile = name..'.cpp'
 		local objfile = name..self.env.objSuffix
 		
@@ -1530,7 +1531,7 @@ function gcc:addExtraObjFiles(objfiles, result)
 		})
 		
 		self.env.objLogFile = name..'-obj.log'	-- what's this for again?
-		local status, compileLog = self.env:buildObj(objfile, srcfile) 	-- TODO allow capture output log
+		local status, compileLog = self.env:buildObj(objfile, srcfile)
 		result.compileLog = result.compileLog..compileLog
 		if not status then
 			result.error = "failed to build c code"
@@ -1709,7 +1710,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 --print('adding program entry', id)
 	
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
-	local srcfn = pathToCLCPU..'/exec-single.c'
+	local srcfn = cl.pathToCLCPU..'/exec-single.c'
 	local code = table{
 		template(file[srcfn], {
 			id = id,
