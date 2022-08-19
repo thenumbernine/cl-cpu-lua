@@ -15,8 +15,8 @@ local pathToCLCPU = '../cl-cpu'
 local extraStrictVerification = true
 
 
---local kernelCallMethod = 'Lua'
---local kernelCallMethod = 'C-singlethread'
+--local kernelCallMethod = 'Lua'				-- fps 3
+--local kernelCallMethod = 'C-singlethread'		-- fps 15
 local kernelCallMethod = 'C-multithread'
 
 
