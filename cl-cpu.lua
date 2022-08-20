@@ -1545,6 +1545,9 @@ function cl.clEnqueueCopyBuffer(
 
 	ffi.copy(dst_buffer[0].ptr + dst_offset, src_buffer[0].ptr + src_offset, size)
 
+	-- CL_MEM_OBJECT_ALLOCATION_FAILURE if there's failure to allocate memory associated with src_buffer or dst_buffer (not needed in only-CPU version?)
+	-- CL_OUT_OF_HOST_MEMORY if the OpenCL host fails to allocate (same?)
+
 	return ffi.C.CL_SUCCESS
 end
 
