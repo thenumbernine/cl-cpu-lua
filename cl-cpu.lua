@@ -911,6 +911,15 @@ cl.clGetDeviceInfo = makeGetter{
 	[ffi.C.CL_DEVICE_OPENCL_C_VERSION] = 'OpenCL 1.1',
 	[ffi.C.CL_DEVICE_LINKER_AVAILABLE] = false,
 	[ffi.C.CL_DEVICE_BUILT_IN_KERNELS] = '',
+		
+	-- ok luajit ...
+	-- you can assign variables with suffixes LL or ULL
+	-- but you can't ffi.cdef enum them
+	[ffi.C.CL_DEVICE_IMAGE2D_MAX_WIDTH] = { type = 'size_t', value = 0xFFFFFFFFFFFFFFFFULL},
+	[ffi.C.CL_DEVICE_IMAGE2D_MAX_HEIGHT] = { type = 'size_t', value = 0xFFFFFFFFFFFFFFFFULL},
+	[ffi.C.CL_DEVICE_IMAGE3D_MAX_WIDTH] = { type = 'size_t', value = 0xFFFFFFFFFFFFFFFFULL},
+	[ffi.C.CL_DEVICE_IMAGE3D_MAX_HEIGHT] = { type = 'size_t', value = 0xFFFFFFFFFFFFFFFFULL},
+	[ffi.C.CL_DEVICE_IMAGE3D_MAX_DEPTH] = { type = 'size_t', value = 0xFFFFFFFFFFFFFFFFULL},
 }
 
 function cl.clGetDeviceIDs(platform, deviceType, count, devices, countPtr)
@@ -1071,6 +1080,17 @@ local function memCastAndVerify(mem)
 			error'here'
 		end
 	end
+	return mem
+end
+
+local function memCastAndVerifyAndAssertNotNull(mem)
+	local mem, err = memCastAndVerify(mem)
+	if err then return err end
+	
+	if mem[0].ptr == nil then
+		return nil, ffi.C.CL_INVALID_MEM_OBJECT
+	end
+	
 	return mem
 end
 
@@ -1422,12 +1442,8 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
 	
-	local buffer, err = memCastAndVerify(buffer)
+	local buffer, err = memCastAndVerifyAndAssertNotNull(buffer)
 	if err then return err end
-	
-	if buffer[0].ptr == nil then
-		return ffi.C.CL_INVALID_MEM_OBJECT
-	end
 
 	if pattern == nil then
 		return ffi.C.CL_INVALID_VALUE
@@ -1474,6 +1490,60 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 		end
 --print(debug.traceback())
 	end
+
+	return ffi.C.CL_SUCCESS
+end
+
+function cl.clEnqueueCopyBuffer(
+	cmds,	-- cl_command_queue
+	src_buffer,	-- cl_mem
+	dst_buffer,	-- cl_mem
+	src_offset,	-- size_t
+	dst_offset,	-- size_t
+	size,	-- size_t
+	numWaitListEvents,	-- cl_uint
+	waitListEvents,	-- const cl_event *
+	event	-- cl_event *
+)
+	src_buffer = ffi.cast('uint8_t*', src_buffer)
+	dst_buffer = ffi.cast('uint8_t*', dst_buffer)
+	src_offset = ffi.cast('size_t', src_offset)
+	dst_offset = ffi.cast('size_t', dst_offset)
+	size = ffi.cast('size_t', size)
+	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
+	waitListEvents = ffi.cast('cl_event*', waitListEvents)
+	event = ffi.cast('cl_event*', event)
+	
+	local cmds, err = queueCastAndVerify(cmds)
+	if err then return err end
+	
+	if numWaitListEvents > 0 and waitListEvents == nil then
+		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
+	end
+	handleEvents(numWaitListEvents, waitListEvents, event)
+	
+	local src_buffer, err = memCastAndVerifyAndAssertNotNull(src_buffer)
+	if err then return err end
+	
+	local dst_buffer, err = memCastAndVerifyAndAssertNotNull(dst_buffer)
+	if err then return err end
+	
+	if src_offset + size > src_buffer[0].size then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	
+	if dst_offset + size > dst_buffer[0].size then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	if src_buffer == dst_buffer
+	and src_offset + size > dst_offset	-- src max > dst min
+	and src_offset < dst_offset + size	-- src min < dst max
+	then
+		return ffi.C.CL_MEM_COPY_OVERLAP
+	end
+
+	ffi.copy(dst_buffer[0].ptr + dst_offset, src_buffer[0].ptr + src_offset, size)
 
 	return ffi.C.CL_SUCCESS
 end
@@ -1545,7 +1615,7 @@ function gcc:addExtraObjFiles(objfiles, result)
 
 		self.env.compiler = pushcompiler
 		self.env.cppver = pushcppver
-		self.env.compileFlags = pushcflags 
+		self.env.compileFlags = pushcflags
 	end
 end
 
@@ -1868,10 +1938,10 @@ cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
 
 
 
-<? 
+<?
 if kernelCallMethod == 'C-singlethread'
 or kernelCallMethod == 'C-multithread'
-then 
+then
 ?>
 
 typedef struct ffi_type;
