@@ -50,8 +50,12 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 typedef unsigned long ulong;
 
-
+//https://stackoverflow.com/questions/45108628/how-to-enable-fp16-type-on-gcc-for-x86-64
+// so maybe with clang?
 // TODO half?
+//typedef __fp16 half;
+
+
 <? for _,base in ipairs(vectorTypes) do ?>
 typedef union {
 	struct { <?=base?> x, y; };

@@ -893,7 +893,10 @@ cl.clGetDeviceInfo = makeGetter{
 	[ffi.C.CL_DEVICE_VENDOR] = 'Christopher Moore',
 	[ffi.C.CL_DEVICE_PROFILE] = 'FULL_PROFILE',
 	[ffi.C.CL_DEVICE_VERSION] = 'OpenCL 1.1',
-	[ffi.C.CL_DEVICE_EXTENSIONS] = 'cl_khr_fp64',
+	[ffi.C.CL_DEVICE_EXTENSIONS] = table{
+		'cl_khr_fp64',
+		--'cl_khr_fp16', -- see the half comments in exec-single.c
+	}:concat' '
 	[ffi.C.CL_DEVICE_PLATFORM] = {
 		type = 'cl_platform_id',
 		getArray = function(paramSize, resultPtr, sizePtr)
