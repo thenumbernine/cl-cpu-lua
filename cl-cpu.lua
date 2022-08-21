@@ -18,13 +18,13 @@ cl.pathToCLCPU = '.'
 local extraStrictVerification = true
 
 
---local kernelCallMethod = 'Lua'				-- fps 3
---local kernelCallMethod = 'C-singlethread'		-- fps 15
-local kernelCallMethod = 'C-multithread'
+--cl.clcpu_kernelCallMethod = 'Lua'				-- fps 3
+--cl.clcpu_kernelCallMethod = 'C-singlethread'		-- fps 15
+cl.clcpu_kernelCallMethod = 'C-multithread'
 
 
-if kernelCallMethod == 'C-singlethread'
-or kernelCallMethod == 'C-multithread'
+if cl.clcpu_kernelCallMethod == 'C-singlethread'
+or cl.clcpu_kernelCallMethod == 'C-multithread'
 then
 	require 'ffi.ffi'	-- this is lib-ffi, not luajit-ffi
 end
@@ -66,7 +66,7 @@ end
 
 
 local numcores = 1
-if kernelCallMethod == 'C-multithread' then
+if cl.clcpu_kernelCallMethod == 'C-multithread' then
 	-- TODO get numcores from hardware_concurrency
 	require 'ffi.c.sys.sysinfo'
 	numcores = tonumber(ffi.C.get_nprocs())
@@ -1562,7 +1562,7 @@ local gcc = require 'ffi-c.c'
 
 
 function gcc:addExtraObjFiles(objfiles, result)
-	if kernelCallMethod == 'C-multithread' then
+	if cl.clcpu_kernelCallMethod == 'C-multithread' then
 	
 		local libIndex = #self.libfiles
 		local name = 'libtmp_'..self.cobjIndex..'_'..libIndex..'_multi'
@@ -1788,7 +1788,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 		template(file[srcfn], {
 			id = id,
 			vectorTypes = vectorTypes,
-			kernelCallMethod = kernelCallMethod,
+			kernelCallMethod = cl.clcpu_kernelCallMethod,
 			ffi_all_types = ffi_all_types,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
@@ -1974,7 +1974,7 @@ void _program_<?=id?>_execMultiThread(
 
 ]], 	{
 			id = id,
-			kernelCallMethod = kernelCallMethod,
+			kernelCallMethod = cl.clcpu_kernelCallMethod,
 			ffi_all_types = ffi_all_types,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
@@ -2250,8 +2250,8 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	}
 
 	-- if we're using C+FFI then setup the CIF here
-	if kernelCallMethod == 'C-singlethread'
-	or kernelCallMethod == 'C-multithread'
+	if cl.clcpu_kernelCallMethod == 'C-singlethread'
+	or cl.clcpu_kernelCallMethod == 'C-multithread'
 	then
 		local ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
 		kernel.ffi_atypes = ffi_atypes
@@ -2482,9 +2482,9 @@ end
 	local srcargs = kernel.args
 	local argInfos = kernel.argInfos
 	
-	-- used with kernelCallMethod == 'Lua'
+	-- used with cl.clcpu_kernelCallMethod == 'Lua'
 	local dstargs
-	if kernelCallMethod == 'Lua' then
+	if cl.clcpu_kernelCallMethod == 'Lua' then
 		dstargs = {}
 		for i=1,kernel.numargs do
 			local argInfo = assert(argInfos[i])
@@ -2538,10 +2538,10 @@ end
 	--print('arg value', arg)
 			dstargs[i] = arg
 		end
-	elseif kernelCallMethod == 'C-singlethread'
-	or kernelCallMethod == 'C-multithread'
+	elseif cl.clcpu_kernelCallMethod == 'C-singlethread'
+	or cl.clcpu_kernelCallMethod == 'C-multithread'
 	then
-		-- used with kernelCallMethod == 'C-singlethread' or 'C-multithread'
+		-- used with cl.clcpu_kernelCallMethod == 'C-singlethread' or 'C-multithread'
 		-- since most often values has to point to a pointer
 		-- reset all values before assigning from what the user provided
 		-- TODO this could be skipped if value-setting was all done in clSetKernelArg
@@ -2627,7 +2627,7 @@ end
 	end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
-	if kernelCallMethod == 'Lua' then
+	if cl.clcpu_kernelCallMethod == 'Lua' then
 		local threadinfo = lib['_program_'..pid..'_threadinfo']
 
 		threadinfo[0].global_linear_id = 0
@@ -2662,9 +2662,9 @@ end
 				end
 			end
 		end
-	elseif kernelCallMethod == 'C-singlethread' then
+	elseif cl.clcpu_kernelCallMethod == 'C-singlethread' then
 		lib['_program_'..program.id..'_execSingleThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
-	elseif kernelCallMethod == 'C-multithread' then
+	elseif cl.clcpu_kernelCallMethod == 'C-multithread' then
 		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async
 		-- ... but how to forward / pass varargs?
 		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
@@ -2673,7 +2673,7 @@ end
 		lib['_program_'..program.id..'_execMultiThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 		--lib['_program_'..program.id..'_execSingleThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	else
-		error("unknown kernelCallMethod "..tostring(kernelCallMethod))
+		error("unknown kernelCallMethod "..tostring(cl.clcpu_kernelCallMethod))
 	end
 --print('clEnqueueNDRangeKernel done')
 	return ffi.C.CL_SUCCESS

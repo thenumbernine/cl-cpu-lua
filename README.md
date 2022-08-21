@@ -7,6 +7,6 @@ I'm making it in LuaJIT so that I can easily do string manipulation and invoke t
 Maybe later I'll make a C++ version.
 
 Depends on my libraries:
-*	lua-ext
-*	lua-template
-*	lua-ffi-c
+*	[lua-ext](https://github.com/thenumbernine/lua-ext)
+*	[lua-template](https://github.com/thenumbernine/lua-template)
+*	[lua-ffi-c](https://github.com/thenumbernine/lua-ffi-c)
