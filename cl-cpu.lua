@@ -1050,6 +1050,8 @@ end
 
 local allMems = table()
 local allPtrs = table()	-- because I don't trust luajit to not gc a ptr I ffi.new'd
+cl.clcpu_allMems = allMems
+cl.clcpu_allPtrs = allPtrs
 
 local cl_mem_verify = ffi.C.rand()
 
@@ -1848,6 +1850,8 @@ function cl.clCreateProgramWithBinary(ctx, numDevices, devices, lengths, binarie
 	error("not yet implemented")
 end
 
+cl.clcpu_build = 'release'
+
 function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
 	--programHandle = ffi.cast('cl_program', programHandle)
 	numDevices = ffi.cast('cl_uint', numDevices)
@@ -1913,7 +1917,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	local headerCode
 	xpcall(function()
 		gcc.currentProgramID = program.id
-		local result = gcc:compile(program.code)
+		local result = gcc:compile{code=program.code, build=cl.clcpu_build}
 		if result.error then error(result.error) end
 --print('done compiling program entry', id)
 		
