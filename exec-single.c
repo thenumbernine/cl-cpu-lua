@@ -43,6 +43,8 @@ typedef char bool;
 #define CLK_LOCAL_MEM_FENCE	0
 void barrier(int whatever) {}
 
+#define mix(a, b, t) 	((a) * (1. - t) + (b) * t)
+
 #include <math.h>
 
 typedef unsigned char uchar;
