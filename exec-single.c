@@ -44,6 +44,7 @@ typedef char bool;
 void barrier(int whatever) {}
 
 #define mix(a, b, t) 	((a) * (1. - t) + (b) * t)
+#define rsqrt(x)		(1. / sqrt(x))
 
 #include <math.h>
 
