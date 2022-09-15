@@ -25,7 +25,7 @@ cl.clcpu_kernelCallMethod = 'C-multithread'
 if cl.clcpu_kernelCallMethod == 'C-singlethread'
 or cl.clcpu_kernelCallMethod == 'C-multithread'
 then
-	require 'ffi.ffi'	-- this is lib-ffi, not luajit-ffi
+	require 'ffi.libffi'	-- this is lib-ffi, not luajit-ffi
 end
 
 local ffi_all_types = table{
