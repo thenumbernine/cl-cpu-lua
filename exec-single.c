@@ -78,7 +78,8 @@ typedef union {
 	<?=base?> s[4];
 } <?=base?>4 __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*4?>)));
 
-#define _<?=base?>4(a,b,c,d) (<?=base?>4){.s={a,b,c,d}}
+#define _<?=base?>2(a,b)		(<?=base?>2){.s={a,b}}
+#define _<?=base?>4(a,b,c,d)	(<?=base?>4){.s={a,b,c,d}}
 
 typedef union {
 	struct { <?=base?> x, y, z, w; };

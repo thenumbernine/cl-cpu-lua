@@ -1807,9 +1807,11 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	local realtype = code:match'typedef%s+(%S*)%s+real;'
 	if realtype then
 --print('replacing realtype '..realtype)
+		code = code:gsub('%(real2%)', '('..realtype..'2)')
 		code = code:gsub('%(real4%)', '('..realtype..'4)')
 	end
 	for _,base in ipairs(vectorTypes) do
+		code = code:gsub('%('..base..'2%)%(', '_'..base..'2(')
 		code = code:gsub('%('..base..'4%)%(', '_'..base..'4(')
 	end
 
@@ -1819,6 +1821,9 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	-- opencl also overloads arithmetic operators ...
 	code = code:gsub('i %+= _int4%(([^)]*)%)', function(inside)
 		return 'i = int4_add(i,_int4('..inside..'))'
+	end)
+	code = code:gsub('i %+= _int2%(([^)]*)%)', function(inside)
+		return 'i = int2_add(i,_int2('..inside..'))'
 	end)
 
 	-- replace #pragma OPENCL with comments
