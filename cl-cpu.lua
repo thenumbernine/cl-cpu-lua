@@ -1805,26 +1805,23 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 
 	-- hmm, typedef with a cl vector type, which uses constructor syntax not supported by C...
 	local realtype = code:match'typedef%s+(%S*)%s+real;'
-	if realtype then
+	for _,n in ipairs{2,4} do
+		if realtype then
 --print('replacing realtype '..realtype)
-		code = code:gsub('%(real2%)', '('..realtype..'2)')
-		code = code:gsub('%(real4%)', '('..realtype..'4)')
-	end
-	for _,base in ipairs(vectorTypes) do
-		code = code:gsub('%('..base..'2%)%(', '_'..base..'2(')
-		code = code:gsub('%('..base..'4%)%(', '_'..base..'4(')
-	end
+			code = code:gsub('%(real'..n..'%)', '('..realtype..n..')')
+		end
+		for _,base in ipairs(vectorTypes) do
+			code = code:gsub('%('..base..n..'%)%(', '_'..base..n..'(')
+		end
 
-	-- hmm, opencl allows for (type#)(...) initializers for vectors
-	-- how to convert this to C ?
-
-	-- opencl also overloads arithmetic operators ...
-	code = code:gsub('i %+= _int4%(([^)]*)%)', function(inside)
-		return 'i = int4_add(i,_int4('..inside..'))'
-	end)
-	code = code:gsub('i %+= _int2%(([^)]*)%)', function(inside)
-		return 'i = int2_add(i,_int2('..inside..'))'
-	end)
+		-- hmm, opencl allows for (type#)(...) initializers for vectors
+		-- how to convert this to C ?
+		
+		-- opencl also overloads arithmetic operators ...
+		code = code:gsub('i %+= _int'..n..'%(([^)]*)%)', function(inside)
+			return 'i = int'..n..'_add(i,_int'..n..'('..inside..'))'
+		end)
+	end
 
 	-- replace #pragma OPENCL with comments
 	code = string.split(code, '\n'):mapi(function(l)
@@ -1930,7 +1927,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		headerCode = template([[
 
 //everything accessible everywhere goes here
-typedef struct {
+typedef struct cl_globalinfo_t {
 	uint work_dim;
 	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
@@ -1941,7 +1938,7 @@ cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 
 // everything in the following need to know which core you're on:
-typedef struct {
+typedef struct cl_threadinfo_t {
 	size_t global_linear_id;
 	size_t local_linear_id;
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
