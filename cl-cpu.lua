@@ -1927,25 +1927,25 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		headerCode = template([[
 
 //everything accessible everywhere goes here
-typedef struct cl_globalinfo_t {
+typedef struct cl_globalinfo_t_<?=id?> {
 	uint work_dim;
 	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} cl_globalinfo_t;
-cl_globalinfo_t _program_<?=id?>_globalinfo;
+} cl_globalinfo_t_<?=id?>;
+cl_globalinfo_t_<?=id?> _program_<?=id?>_globalinfo;
 
 
 // everything in the following need to know which core you're on:
-typedef struct cl_threadinfo_t {
+typedef struct cl_threadinfo_t_<?=id?> {
 	size_t global_linear_id;
 	size_t local_linear_id;
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} cl_threadinfo_t;
-cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
+} cl_threadinfo_t_<?=id?>;
+cl_threadinfo_t_<?=id?> _program_<?=id?>_threadinfo[<?=numcores?>];
 
 
 
