@@ -1,6 +1,6 @@
 local ffi = require 'ffi'
 local table = require 'ext.table'
-local file = require 'ext.file'
+local path = require 'ext.path'
 local string = require 'ext.string'
 local template = require 'template'
 
@@ -1600,7 +1600,7 @@ function gcc:addExtraObjFiles(objfiles, result)
 		local objfile = name..self.env.objSuffix
 		
 		-- generate the file from the templated file
-		file(srcfile):write(template(file(srcsrcfile):read(), {
+		path(srcfile):write(template(path(srcsrcfile):read(), {
 			id = self.currentProgramID,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
@@ -1789,7 +1789,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local srcfn = cl.pathToCLCPU..'/exec-single.c'
 	local code = table{
-		template(file(srcfn):read(), {
+		template(path(srcfn):read(), {
 			id = id,
 			vectorTypes = vectorTypes,
 			kernelCallMethod = cl.clcpu_kernelCallMethod,
@@ -1992,7 +1992,7 @@ void _program_<?=id?>_execMultiThread(
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local lib = result.lib
 		local libfile = result.libfile
-		local libdata = assert(file(result.libfile):read(), "couldn't open file "..result.libfile)
+		local libdata = assert(path(result.libfile):read(), "couldn't open file "..result.libfile)
 		local compileLog = result.compileLog
 		local linkLog = result.linkLog
 		
