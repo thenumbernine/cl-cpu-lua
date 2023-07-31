@@ -4,7 +4,7 @@ local path = require 'ext.path'
 local string = require 'ext.string'
 local template = require 'template'
 
-require 'ffi.c.stdlib'	-- rand()
+require 'ffi.req' 'c.stdlib'	-- rand()
 
 
 
@@ -25,7 +25,7 @@ cl.clcpu_kernelCallMethod = 'C-multithread'
 if cl.clcpu_kernelCallMethod == 'C-singlethread'
 or cl.clcpu_kernelCallMethod == 'C-multithread'
 then
-	require 'ffi.libffi'	-- this is lib-ffi, not luajit-ffi
+	require 'ffi.req' 'libffi'	-- this is lib-ffi, not luajit-ffi
 end
 
 local ffi_all_types = table{
@@ -67,7 +67,7 @@ end
 local numcores = 1
 if cl.clcpu_kernelCallMethod == 'C-multithread' then
 	-- TODO get numcores from hardware_concurrency
-	require 'ffi.c.sys.sysinfo'
+	require 'ffi.req' 'c.sys.sysinfo'
 	numcores = tonumber(ffi.C.get_nprocs())
 	print('using '..numcores..' cores')
 end
