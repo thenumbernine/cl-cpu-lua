@@ -51,7 +51,7 @@ local ffi_all_types = table{
 	{'float', 'float'},
 	{'double', 'double'},
 	{'long double', 'longdouble'},
-	
+
 	-- these don't need setters
 	{'void', 'void'},
 	{'void*', 'pointer'},
@@ -576,7 +576,7 @@ typedef cl_uint          cl_gl_platform_info;
 typedef cl_uint          cl_gl_context_info;
 typedef struct __GLsync* cl_GLsync;
 typedef cl_int        (* clGetGLContextInfoKHR_fn)( const cl_context_properties *, cl_gl_context_info, size_t, void *, size_t * );
-    
+
 enum {
   cl_khr_gl_sharing                      = 1,
   CL_GL_OBJECT_BUFFER                    = 0x2000,
@@ -658,12 +658,12 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 	else
 		name = tonumber(ffi.cast('cl_uint', name))
 	end
-	
+
 	paramSize = ffi.cast('size_t', paramSize)
 	resultPtr = ffi.cast('void*', resultPtr)
 	sizePtr = ffi.cast('size_t*', sizePtr)
 --print(args.name, id, name)--, paramSize, resultPtr, sizePtr)
-	
+
 	local var = args[name]
 	if not var then return ffi.C.CL_INVALID_VALUE end
 
@@ -711,7 +711,7 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 		if sizePtr ~= nil then
 			sizePtr[0] = #strValue + 1
 		end
-		
+
 		if resultPtr ~= nil then
 			-- don't copy more than paramSize bytes
 			if paramSize < #strValue + 1 then
@@ -738,7 +738,7 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 			resultPtr[0] = value
 		end
 	end
-	
+
 	return ffi.C.CL_SUCCESS
 end
 
@@ -790,11 +790,11 @@ cl.clGetPlatformInfo = makeGetter{
 }
 
 function cl.clGetPlatformIDs(count, platforms, countPtr)
-	
+
 	count = ffi.cast('cl_uint', count)
 	platforms = ffi.cast('cl_platform_id*', platforms)
 	countPtr = ffi.cast('cl_uint*', countPtr)
-	
+
 	if count == 0 and platforms ~= nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
@@ -804,11 +804,11 @@ function cl.clGetPlatformIDs(count, platforms, countPtr)
 	if countPtr ~= nil then
 		countPtr[0] = 1
 	end
-	
+
 	if platforms ~= nil and count >= 1 then
 		platforms[0] = ffi.cast('struct _cl_platform_id*', allPlatforms[1])
 	end
-	
+
 	return ffi.C.CL_SUCCESS
 end
 
@@ -913,7 +913,7 @@ cl.clGetDeviceInfo = makeGetter{
 	[ffi.C.CL_DEVICE_OPENCL_C_VERSION] = 'OpenCL 1.1',
 	[ffi.C.CL_DEVICE_LINKER_AVAILABLE] = false,
 	[ffi.C.CL_DEVICE_BUILT_IN_KERNELS] = '',
-		
+
 	-- ok luajit ...
 	-- you can assign variables with suffixes LL or ULL
 	-- but you can't ffi.cdef enum them
@@ -933,12 +933,12 @@ function cl.clGetDeviceIDs(platform, deviceType, count, devices, countPtr)
 
 	local platform, err = platformCastAndVerify(platform)
 	if err then return err end
-	
+
 	-- if deviceType isn't valid then return CL_INVALID_DEVICE_TYPE end
 	if count == 0 and devices ~= nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
-	
+
 	-- should I only return success when querying cpus?
 	--if bit.band(deviceType, bit.bor(ffi.C.CL_DEVICE_TYPE_CPU, ffi.C.CL_DEVICE_TYPE_DEFAULT)) ~= 0 then
 	-- or just always?
@@ -1090,11 +1090,11 @@ end
 local function memCastAndVerifyAndAssertNotNull(mem)
 	local mem, err = memCastAndVerify(mem)
 	if err then return err end
-	
+
 	if mem[0].ptr == nil then
 		return nil, ffi.C.CL_INVALID_MEM_OBJECT
 	end
-	
+
 	return mem
 end
 
@@ -1178,7 +1178,7 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errPtr)
 		end
 		return ffi.cast('cl_mem', nil)
 	end
-	
+
 	if bit.band(flags, bit.bnot(bit.bor(
 		ffi.C.CL_MEM_READ_WRITE,
 		ffi.C.CL_MEM_WRITE_ONLY,
@@ -1192,7 +1192,7 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errPtr)
 		end
 		return ffi.cast('cl_mem', nil)
 	end
-	
+
 	if size == 0
 	or size > clDeviceMaxMemAllocSize
 	then
@@ -1227,9 +1227,9 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errPtr)
 	mem[0].hostPtr = hostPtr
 	mem[0].ctx = ctx
 	allMems:insert(mem)	-- don't let luajit gc it.  TODO refcount / retain / release to keep track of it that way
-	
+
 	if reqHost then ffi.copy(mem[0].ptr, hostPtr, size) end
-	
+
 	if errPtr ~= nil then
 		errPtr[0] = ffi.C.CL_SUCCESS
 	end
@@ -1291,7 +1291,7 @@ function cl.clCreateCommandQueue(ctx, device, properties, errPtr)
 	if errPtr ~= nil then
 		errPtr[0] = ffi.C.CL_SUCCESS
 	end
-	
+
 	local cmds = ffi.cast('cl_command_queue', allCmds[1])
 	cmds[0].ctx = ctx
 	cmds[0].device = device
@@ -1359,14 +1359,14 @@ function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWait
 		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
 	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
-	
+
 	if ptr == nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
 
 	local buffer, err = memCastAndVerify(buffer)
 	if err then return err end
-	
+
 	if buffer[0].ptr == nil then
 		return ffi.C.CL_INVALID_MEM_OBJECT
 	end
@@ -1374,9 +1374,9 @@ function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWait
 	if offset + size > buffer[0].size then
 		return ffi.C.CL_INVALID_VALUE
 	end
-	
+
 	ffi.copy(buffer[0].ptr + offset, ptr, size)
-	
+
 	return ffi.C.CL_SUCCESS
 end
 
@@ -1392,7 +1392,7 @@ function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitL
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
 --print('clEnqueueReadBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
-	
+
 	local cmds, err = queueCastAndVerify(cmds)
 	if err then return err end
 
@@ -1400,24 +1400,24 @@ function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitL
 		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
 	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
-	
+
 	if ptr == nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
 
 	local buffer, err = memCastAndVerify(buffer)
 	if err then return err end
-	
+
 	if buffer[0].ptr == nil then
 		return ffi.C.CL_INVALID_MEM_OBJECT
 	end
-	
+
 	if offset + size > buffer[0].size then
 		return ffi.C.CL_INVALID_VALUE
 	end
-	
+
 	ffi.copy(ptr, buffer[0].ptr + offset, size)
-	
+
 	return ffi.C.CL_SUCCESS
 end
 
@@ -1445,14 +1445,14 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
 	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
-	
+
 	local buffer, err = memCastAndVerifyAndAssertNotNull(buffer)
 	if err then return err end
 
 	if pattern == nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
-	
+
 	if patternSize ~= 1
 	and patternSize ~= 2
 	and patternSize ~= 4
@@ -1469,7 +1469,7 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 	if size % patternSize ~= 0 then
 		return ffi.C.CL_INVALID_VALUE
 	end
-	
+
 	if offset + size > buffer[0].size then
 		return ffi.C.CL_INVALID_VALUE
 	end
@@ -1517,25 +1517,25 @@ function cl.clEnqueueCopyBuffer(
 	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
-	
+
 	local cmds, err = queueCastAndVerify(cmds)
 	if err then return err end
-	
+
 	if numWaitListEvents > 0 and waitListEvents == nil then
 		return ffi.C.CL_INVALID_EVENT_WAIT_LIST
 	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
-	
+
 	local src_buffer, err = memCastAndVerifyAndAssertNotNull(src_buffer)
 	if err then return err end
-	
+
 	local dst_buffer, err = memCastAndVerifyAndAssertNotNull(dst_buffer)
 	if err then return err end
-	
+
 	if src_offset + size > src_buffer[0].size then
 		return ffi.C.CL_INVALID_VALUE
 	end
-	
+
 	if dst_offset + size > dst_buffer[0].size then
 		return ffi.C.CL_INVALID_VALUE
 	end
@@ -1567,16 +1567,17 @@ local gcc = require 'ffi-c.c'
 -- c++ fails on field initialization
 --local gcc = require 'ffi-c.cpp'
 
+-- called from gcc:link stage
 function gcc:addExtraObjFiles(objfiles, result)
 	if cl.clcpu_kernelCallMethod == 'C-multithread' then
-	
+
 		local libIndex = #self.libfiles
 		local name = self:getBuildDir()..'/libtmp_'..self.cobjIndex..'_'..libIndex..'_multi'
-		
+
 		local pushcompiler = self.env.compiler
 		local pushcppver = self.env.cppver
 		self.env.compiler = 'g++'
-		
+
 		-- TODO this has to be done before postConfig()
 		-- or else it won't get baked into the compileFlags
 		-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
@@ -1596,19 +1597,19 @@ function gcc:addExtraObjFiles(objfiles, result)
 		-- on second thought, I can't use macros in the luajit ffi.cdef
 		-- so for that i'd have to replace stuff anyways
 		-- so meh might as well just use templates
-	
+
 		local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
 		local srcfile = name..'.cpp'
 		local objfile = name..self.env.objSuffix
-		
+
 		-- generate the file from the templated file
 		path(srcfile):write(template(assert(path(srcsrcfile):read()), {
-			id = self.currentProgramID,
+			id = result.currentProgramID,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 			ffi_all_types = ffi_all_types,
 		}))
-		
+
 		self.env.objLogFile = name..'-obj.log'	-- what's this for again?
 		local status, compileLog = self.env:buildObj(objfile, srcfile)
 		result.compileLog = result.compileLog..compileLog
@@ -1619,7 +1620,7 @@ function gcc:addExtraObjFiles(objfiles, result)
 		end
 
 		objfiles:insert(objfile)
-		
+
 		self.env.macros =self.env.macros:sub(1, nmacros)
 
 		self.env.compiler = pushcompiler
@@ -1793,7 +1794,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	stringsPtr = ffi.cast('char**', stringsPtr)
 	lengthsPtr = ffi.cast('size_t*', lengthsPtr)
 	errPtr = ffi.cast('cl_int*', errPtr)
-	
+
 	local ctx, err = contextCastAndVerify(ctx)
 	if err then
 		if errPtr ~= nil then
@@ -1810,7 +1811,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	programHandle[0].verify = cl_program_verify
 	programHandle[0].id = id
 --print('adding program entry', id)
-	
+
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local srcfn = cl.pathToCLCPU..'/exec-single.c'
 	local code = table{
@@ -1841,7 +1842,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 
 		-- hmm, opencl allows for (type#)(...) initializers for vectors
 		-- how to convert this to C ?
-		
+
 		-- opencl also overloads arithmetic operators ...
 		code = code:gsub('i %+= _int'..n..'%(([^)]*)%)', function(inside)
 			return 'i = int'..n..'_add(i,_int'..n..'('..inside..'))'
@@ -1885,26 +1886,12 @@ cl.clcpu_build = 'release'
 function cl.clCompileProgram(programHandle, numDevices, devices, options, numInputHeaders, inputHeaders, headerIncludeNames, notify, userData)
 	-- in order to split the clBuildProgram up into compile + link, that means splitting up the ffi-c :build process into separate compile + link ...
 	-- I could do that ... or I could just pull the contents out of it (which relies on lua-make) , and just use that, and separate that into compile + link
-	
+
+	-- [[ NOTICE this all matches clBuildProgram ...
+
 	numDevices = ffi.cast('cl_uint', numDevices)
 	numDevices = tonumber(numDevices)
-	
-	local programHandle, err = programCastAndVerify(programHandle)
-	if err then return err end
-end
 
--- just obj -> exe
---cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
-function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputPrograms, notify, userData, errcodeRet)
-	error("not yet implemented")
-end
-
--- source -> obj, then obj -> exe
-function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
-	--programHandle = ffi.cast('cl_program', programHandle)
-	numDevices = ffi.cast('cl_uint', numDevices)
-	numDevices = tonumber(numDevices)
-	
 	devices = ffi.cast('cl_device_id*', devices)
 	if (devices == nil and numDevices > 0)
 	or (devices ~= nil and numDevices == 0)
@@ -1929,6 +1916,10 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	end
 	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
 
+	if notify == nil and userData ~= nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
 	local programHandle, err = programCastAndVerify(programHandle)
 	if err then return err end
 
@@ -1937,14 +1928,71 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 --print('compiling program entry', id)
 	local program = programsForID[id]
 
+	-- if there are kernels attached to the program...
+	if next(program.kernels) ~= nil then
+		return ffi.C.CL_INVALID_OPERATION
+	end
+
+	--]]
+end
+
+-- just obj -> exe
+--cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
+function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputPrograms, notify, userData, errcodeRet)
+	error("not yet implemented")
+end
+
+-- source -> obj, then obj -> exe
+function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
+	--programHandle = ffi.cast('cl_program', programHandle)
+
+	-- [[ NOTICE this all matches clCompileProgram ...
+
+	numDevices = ffi.cast('cl_uint', numDevices)
+	numDevices = tonumber(numDevices)
+
+	devices = ffi.cast('cl_device_id*', devices)
+	if (devices == nil and numDevices > 0)
+	or (devices ~= nil and numDevices == 0)
+	then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	-- make a local copy so program can hold onto it
+	local newDevices = ffi.new('cl_device_id[?]', numDevices)
+	for i=0,numDevices-1 do
+		local device, err = deviceCastAndVerify(devices[i])
+		if err then return err end
+		-- TODO if device is still building a program then return CL_INVALID_OPERATION
+		newDevices[i] = device
+	end
+	devices = newDevices
+
+	options = ffi.cast('char*', options)
+	if options ~= nil then
+		options = ffi.string(options)
+	else
+		options = nil
+	end
+	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
+
 	if notify == nil and userData ~= nil then
 		return ffi.C.CL_INVALID_VALUE
 	end
+
+	local programHandle, err = programCastAndVerify(programHandle)
+	if err then return err end
+
+	local err = ffi.C.CL_SUCCESS
+	local id = programHandle[0].id
+--print('compiling program entry', id)
+	local program = programsForID[id]
 
 	-- if there are kernels attached to the program...
 	if next(program.kernels) ~= nil then
 		return ffi.C.CL_INVALID_OPERATION
 	end
+
+	--]]
 
 	-- TODO if program was built with binary and devices listed in device_list do not have a valid program binary loaded then return bL_INVALID_BINARY
 	-- TODO CL_COMPILER_NOT_AVAILABLE
@@ -1964,21 +2012,22 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 
 	local headerCode
 	xpcall(function()
-		gcc.currentProgramID = program.id
-		
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
 		-- :compile - code -> .o file
 		-- :link - .o file -> .so file
 		-- :load - loads the .so file
 		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
-		local result = gcc:build{
+		local result = gcc:build({
 			code = program.code,
 			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
-		}
+		}, {
+			-- used by gcc:link
+			currentProgramID = program.id,
+		})
 		if result.error then error(result.error) end
 --print('done compiling program entry', id)
-		
+
 		-- gcc:build calls ffi.load
 		-- so these should now be available:
 		headerCode = template([[
@@ -2048,7 +2097,7 @@ void _program_<?=id?>_execMultiThread(
 
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local libdata = assert(path(result.libfile):read(), "couldn't open file "..result.libfile)
-		
+
 		program.lib = result.lib
 		program.libfile = result.libfile
 		program.libdata = libdata
@@ -2133,7 +2182,7 @@ cl.clGetKernelInfo = makeGetter{
 
 -- from my lua-preproc project ...
 local function removeCommentsAndApplyContinuations(code)
-	
+
 	-- should line continuations \ affect single-line comments?
 	-- if so then do this here
 	-- or should they not?  then do this after.
@@ -2180,7 +2229,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	kernelName = ffi.string(kernelName)
 	errPtr = ffi.cast('cl_int*', errPtr)
 --print('clCreateKernel', programHandle, kernelName, errPtr)
-	
+
 	local programHandle, err = programCastAndVerify(programHandle)
 	if err then
 		if errPtr ~= nil then
@@ -2202,7 +2251,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	local code = removeCommentsAndApplyContinuations(program.code)
 
 --print('searching for kernel', kernelName)
-	
+
 	-- TODO how to get the signature?
 	-- search for it in the code maybe?
 	-- TODO do this upon clBuildProgram instead of at clCreateKernel
@@ -2217,14 +2266,14 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 
 	local sigargs = sig:match('^kernel%s+void%s+'..kernelName..'%s*%(([^)]*)%)$')
 	assert(sigargs, "doesn't match a kernel void")
-		
+
 	-- split by comma and parse each arg separately
 	-- let's hope there's no macros in there with commas in them
 	local argInfos = table()
 	sigargs = string.split(sigargs, ','):mapi(function(arg,i)
 		local argInfo = {}
 		argInfos[i] = argInfo
-		
+
 		arg = string.trim(arg)
 		local tokens = string.split(arg, '%s+')
 		-- split off any *'s into unique tokens
@@ -2235,7 +2284,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 				table.insert(tokens, j+1, '*')
 				tokens[j] = tokens[j]:sub(1,-2)
 			end
-		
+
 			if tokens[j] == 'global' then
 				table.remove(tokens, j)
 				argInfo.isGlobal = true
@@ -2263,7 +2312,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 		if tokens:find'*' then
 			tokens = table{'void', '*'}
 		end
-		
+
 		-- treat all ptr args as void*'s
 		argInfo.type = tokens:concat' '
 
@@ -2277,7 +2326,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	sigargs = sigargs:concat', '
 
 	sig = 'void '..kernelName.. '(' .. sigargs .. ');'
-	
+
 --print("cdef'ing as sig:\n"..sig)
 	ffi.cdef(sig)
 
@@ -2316,14 +2365,14 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 	then
 		local ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
 		kernel.ffi_atypes = ffi_atypes
-	
+
 		kernel.ffi_rtype = ffi.new('ffi_type*[1]')
 		local lib = program.lib
 		lib.ffi_set_void(kernel.ffi_rtype)	-- kernel always returns void
-		
+
 		kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
 		kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
-	
+
 		for i=1,kernel.numargs do
 			local argInfo = assert(argInfos[i])
 			if argInfo.isGlobal
@@ -2350,19 +2399,19 @@ print("couldn't find setter for type "..k)
 				end
 			end
 		end
-		
+
 		kernel.ffi_cif = ffi.new('ffi_cif[1]')
 		if ffi.C.ffi_prep_cif(kernel.ffi_cif, ffi.C.FFI_DEFAULT_ABI, kernel.numargs, kernel.ffi_rtype[0], ffi_atypes) ~= ffi.C.FFI_OK then
 print("failed to prepare the FFI CIF")
 			errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE
 		end
-	
+
 		-- hmm, luajit can't pass C function pointers into C function pointer args of functions, so gotta make a closure even though I'm not wrapping a luajit function ...
 		kernel.func_closure = ffi.cast('void(*)()', kernel.func)
 	end
 
 	kernelsForID[kernelHandle[0].id] = kernel
-	
+
 	-- TODO what if the kernel was already requested?
 	program.kernels[kernelName] = kernel
 
@@ -2387,7 +2436,7 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 	if not kernel then
 		return ffi.C.CL_INVALID_KERNEL
 	end
-	
+
 	if index >= kernel.numargs then
 		return ffi.C.CL_INVALID_ARG_INDEX
 	end
@@ -2404,7 +2453,7 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 	end
 
 --print('clSetKernelArg', kernelHandle, index, size, value)
-	
+
 	-- if the kernel arg is global then the value better be a cl_mem ...
 	if argInfo.isGlobal
 	or argInfo.isConstant
@@ -2414,7 +2463,7 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 		if verifyvalue == nil then
 			return ffi.C.CL_INVALID_MEM_OBJECT
 		end
-		
+
 		local _, err = memCastAndVerify(verifyvalue[0])
 		if err then return err end
 
@@ -2438,7 +2487,7 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 	-- mind you value is a void* by now.
 	-- if it's a global then it points to a struct _cl_mem
 	kernel.args[index+1] = {ptr=copyOfValue, size=size}
-	
+
 	return ffi.C.CL_SUCCESS
 end
 
@@ -2466,11 +2515,11 @@ end
 function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
 --print(debug.traceback())
 --print('clEnqueueNDRangeKernel', cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
-	
+
 	--cmds = ffi.cast('cl_command_queue', cmds)
 	local cmds, err = queueCastAndVerify(cmds)
 	if err then return err end
-	
+
 	--kernelHandle = ffi.cast('cl_kernel', kernelHandle)
 	local kernelHandle, err = kernelCastAndVerify(kernelHandle)
 	if err then return err end
@@ -2532,17 +2581,17 @@ end
 		end
 	end
 	handleEvents(numWaitListEvents, waitListEvents, event)
-	
+
 	local program = kernel.program
 	if not program then return ffi.C.CL_INVALID_PROGRAM_EXECUTABLE end
 --print('program', program.libfile)
 --print('program id', program.id)
-	
+
 	local pid = program.id
 	local lib = program.lib
 	local srcargs = kernel.args
 	local argInfos = kernel.argInfos
-	
+
 	-- used with cl.clcpu_kernelCallMethod == 'Lua'
 	local dstargs
 	if cl.clcpu_kernelCallMethod == 'Lua' then
@@ -2563,7 +2612,7 @@ end
 			assert(type(arg) == 'cdata')
 			--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
 			assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer
-			
+
 			if argInfo.isGlobal
 			or argInfo.isConstant
 			then	-- assert we have a cl_mem ... same with local?
@@ -2609,7 +2658,7 @@ end
 		for i=0,kernel.numargs-1 do
 			kernel.ffi_values[i] = kernel.ffi_ptrs + i
 		end
-		
+
 		for i=1,kernel.numargs do
 			local argInfo = assert(argInfos[i])
 			--print('ARGINFOTYPE', argInfo.type, argInfo.isGlobal, argInfo.isConstant, argInfo.isLocal)
@@ -2622,7 +2671,7 @@ end
 			assert(type(arg) == 'cdata')
 			--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
 			assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer
-			
+
 			if argInfo.isGlobal
 			or argInfo.isConstant
 			then
@@ -2635,7 +2684,7 @@ end
 					error'here'
 					return err
 				end
-				
+
 				-- ffi says this should be a pointer-to-a-pointer
 				kernel.ffi_ptrs[i-1] = arg[0][0].ptr
 			elseif argInfo.isLocal then
@@ -2718,7 +2767,7 @@ end
 					-- and then immediately store them upon clSetKernelArg
 					-- but this would mean replacing all functions and their prototypes in the C code with empty-args, and then inserting code in the function beginning to copy from these global vars into the function local vars ...
 					kernel.func(table.unpack(dstargs, 1, kernel.numargs))
-				
+
 					threadinfo[0].global_linear_id = threadinfo[0].global_linear_id + 1
 				end
 			end
@@ -2766,14 +2815,14 @@ function handleEvents(numWaitListEvents, waitListEvents, eventHandle)
 	if eventHandle ~= nil then
 		-- eventHandle should be type cl_event*
 		eventHandle = ffi.cast('cl_event*', eventHandle)
-	
+
 		local event = ffi.new'struct _cl_event[1]'
 
 		local id = #allEvents+1
 		allEvents[id] = event
 		event[0].verify = cl_event_verify
 		event[0].id = id
-	
+
 		eventHandle[0] = event
 	end
 end
