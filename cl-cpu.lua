@@ -1600,7 +1600,7 @@ function gcc:addExtraObjFiles(objfiles, result)
 		local objfile = name..self.env.objSuffix
 		
 		-- generate the file from the templated file
-		path(srcfile):write(template(path(srcsrcfile):read(), {
+		path(srcfile):write(template(assert(path(srcsrcfile):read()), {
 			id = self.currentProgramID,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
@@ -1789,7 +1789,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local srcfn = cl.pathToCLCPU..'/exec-single.c'
 	local code = table{
-		template(path(srcfn):read(), {
+		template(assert(path(srcfn):read()), {
 			id = id,
 			vectorTypes = vectorTypes,
 			kernelCallMethod = cl.clcpu_kernelCallMethod,
