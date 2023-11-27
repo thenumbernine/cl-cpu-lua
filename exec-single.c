@@ -25,6 +25,11 @@ end
 
 #if !defined(__cplusplus)
 
+// "constant" is the name of a variable used in bits/timex.h, so ... you can't do this ...
+// unless you can think of a name to define it as which doubles as both a valid c++ name and is an argument attribute that degenerates to nothing.
+// otherwise ...
+// for clcpp files you will have to insert these #defines after all #includes 
+// (and for headers, #undef them at the end of the file)
 #define constant
 #define global
 #define local
@@ -39,6 +44,8 @@ typedef char bool;
 #define clamp(x,_min,_max)	min(_max,max(_min,x))
 
 #else	//__cplusplus
+
+#define CLCPU_ENABLED
 
 #include <algorithm>
 using std::clamp;
