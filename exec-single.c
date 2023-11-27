@@ -105,7 +105,6 @@ typedef union {
 } <?=base?>8 __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*8?>)));
 <? end ?>
 
-
 typedef struct {
 	uint work_dim;
 	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
@@ -158,6 +157,18 @@ static int4 int4_add(int4 a, int4 b) {
 		.w = a.w + b.w,
 	};
 }
+
+#if defined(__cplusplus)
+inline int4 operator+(int4 const & a, int4 const & b) {
+	return int4{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
+}
+inline int4 operator*(int const a, int4 const & b) {
+	return int4{a * b.x, a * b.y, a * b.z, a * b.w};
+}
+inline int4 operator*(int4 const & a, int const b) {
+	return int4{a.x * b, a.y * b, a.z * b, a.w * b};
+}
+#endif	//__cplusplus
 
 // TODO should include isfinite(x) ? NAN : ...
 #define sign(x)	((x) > 0 ? 1 : ((x) < 0 ? -1 : 0))
