@@ -1559,17 +1559,19 @@ end
 -- PROGRAM
 
 
+-- using ffi-c is convenient so long as the compile + link are done together ...
+-- but if I want to separate them, I'll have so do this myself ...
+-- [[
 -- c fails on arith ops for vector types
 local gcc = require 'ffi-c.c'
 -- c++ fails on field initialization
 --local gcc = require 'ffi-c.cpp'
 
-
 function gcc:addExtraObjFiles(objfiles, result)
 	if cl.clcpu_kernelCallMethod == 'C-multithread' then
 	
 		local libIndex = #self.libfiles
-		local name = 'libtmp_'..self.cobjIndex..'_'..libIndex..'_multi'
+		local name = self:getBuildDir()..'/libtmp_'..self.cobjIndex..'_'..libIndex..'_multi'
 		
 		local pushcompiler = self.env.compiler
 		local pushcppver = self.env.cppver
@@ -1625,6 +1627,29 @@ function gcc:addExtraObjFiles(objfiles, result)
 		self.env.compileFlags = pushcflags
 	end
 end
+--]]
+--[[ so this is a more flexible version ...
+-- maybe this should replace ffi-c ?
+-- or maybe it'll end up too cl-specifc?
+local Program = class()
+
+local MakeEnv = require 'make.env'
+function Program:init()
+	self.env = MakeEnv()
+end
+
+function Program:build(code)
+	return {
+		error = nil,
+		libfile = nil,
+		compileLog = nil,
+		linkLog = nil,
+	}
+end
+
+function Program:link(code)
+end
+--]]
 
 local cl_program_verify = ffi.C.rand()
 
@@ -1857,8 +1882,15 @@ cl.clcpu_build = 'release'
 
 -- just source -> obj
 --cl_int clCompileProgram(cl_program program, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_headers, const cl_program * input_headers, const char ** header_include_names, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data);
-function cl.clCompileProgram(program, numDevices, devices, options, numInputHeaders, inputHeaders, headerIncludeNames, notify, userData)
-	error("not yet implemented")
+function cl.clCompileProgram(programHandle, numDevices, devices, options, numInputHeaders, inputHeaders, headerIncludeNames, notify, userData)
+	-- in order to split the clBuildProgram up into compile + link, that means splitting up the ffi-c :build process into separate compile + link ...
+	-- I could do that ... or I could just pull the contents out of it (which relies on lua-make) , and just use that, and separate that into compile + link
+	
+	numDevices = ffi.cast('cl_uint', numDevices)
+	numDevices = tonumber(numDevices)
+	
+	local programHandle, err = programCastAndVerify(programHandle)
+	if err then return err end
 end
 
 -- just obj -> exe
@@ -1933,11 +1965,21 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	local headerCode
 	xpcall(function()
 		gcc.currentProgramID = program.id
-		local result = gcc:compile{code=program.code, build=cl.clcpu_build}
+		
+		-- this does ...
+		-- :setup - makes the make env obj & writes code
+		-- :compile - code -> .o file
+		-- :link - .o file -> .so file
+		-- :load - loads the .so file
+		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
+		local result = gcc:build{
+			code = program.code,
+			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
+		}
 		if result.error then error(result.error) end
 --print('done compiling program entry', id)
 		
-		-- gcc:compile calls ffi.load
+		-- gcc:build calls ffi.load
 		-- so these should now be available:
 		headerCode = template([[
 
@@ -2005,30 +2047,26 @@ void _program_<?=id?>_execMultiThread(
 		ffi.cdef(headerCode)
 
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
-		local lib = result.lib
-		local libfile = result.libfile
 		local libdata = assert(path(result.libfile):read(), "couldn't open file "..result.libfile)
-		local compileLog = result.compileLog
-		local linkLog = result.linkLog
 		
-		program.lib = lib
-		program.libfile = libfile
+		program.lib = result.lib
+		program.libfile = result.libfile
 		program.libdata = libdata
-		program.compileLog = compileLog
-		program.linkLog = linkLog
+		program.compileLog = result.compileLog
+		program.linkLog = result.linkLog
 		program.numDevices = numDevices
 		program.devices = programDevices
 		program.status = ffi.C.CL_BUILD_SUCCESS
 		program.options = options
 
 	end, function(err)
-io.stderr:write('gcc code:', '\n')
-io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
-io.stderr:write('header code:', '\n')
-io.stderr:write(require 'template.showcode'(tostring(headerCode)), '\n')
-io.stderr:write('error while compiling: '..tostring(err), '\n')
-io.stderr:write(debug.traceback(), '\n')
-io.stderr:flush()
+		io.stderr:write('gcc code:', '\n')
+		io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
+		io.stderr:write('header code:', '\n')
+		io.stderr:write(require 'template.showcode'(tostring(headerCode)), '\n')
+		io.stderr:write('error while compiling: '..tostring(err), '\n')
+		io.stderr:write(debug.traceback(), '\n')
+		io.stderr:flush()
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
@@ -2845,7 +2883,7 @@ cl.cleanup = class(GCWrapper{
 	gctype = 'cl_cpu_shutdown_t',
 	ctype = 'int',
 	release = function(ptr)
-		os.execute('rm libtmp*')
+		os.execute('rm /tmp/libtmp*')
 	end,
 })()
 --]]
