@@ -1568,7 +1568,7 @@ local gcc = require 'ffi-c.c'
 --local gcc = require 'ffi-c.cpp'
 
 -- called from gcc:link stage
-function gcc:addExtraObjFiles(objfiles, result)
+function gcc:addExtraObjFiles(objfiles, buildCtx)
 	if cl.clcpu_kernelCallMethod == 'C-multithread' then
 
 		local libIndex = #self.libfiles
@@ -1603,20 +1603,20 @@ function gcc:addExtraObjFiles(objfiles, result)
 		local objfile = name..self.env.objSuffix
 
 		-- generate the file from the templated file
-		path(srcfile):write(template(assert(path(srcsrcfile):read()), {
-			id = result.currentProgramID,
+		assert(path(srcfile):write(template(assert(path(srcsrcfile):read()), {
+			id = buildCtx.currentProgramID,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 			ffi_all_types = ffi_all_types,
-		}))
+		})))
 
 		self.env.objLogFile = name..'-obj.log'	-- what's this for again?
 		local status, compileLog = self.env:buildObj(objfile, srcfile)
-		result.compileLog = result.compileLog..compileLog
+		buildCtx.compileLog = buildCtx.compileLog..compileLog
 		if not status then
-			result.error = "failed to build c code"
+			buildCtx.error = "failed to build c code"
 			error'here'	-- throwing away errors?
-			--return result
+			--return buildCtx
 		end
 
 		objfiles:insert(objfile)
@@ -1881,155 +1881,9 @@ end
 
 cl.clcpu_build = 'release'
 
--- just source -> obj
---cl_int clCompileProgram(cl_program program, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_headers, const cl_program * input_headers, const char ** header_include_names, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data);
-function cl.clCompileProgram(programHandle, numDevices, devices, options, numInputHeaders, inputHeaders, headerIncludeNames, notify, userData)
-	-- in order to split the clBuildProgram up into compile + link, that means splitting up the ffi-c :build process into separate compile + link ...
-	-- I could do that ... or I could just pull the contents out of it (which relies on lua-make) , and just use that, and separate that into compile + link
-
-	-- [[ NOTICE this all matches clBuildProgram ...
-
-	numDevices = ffi.cast('cl_uint', numDevices)
-	numDevices = tonumber(numDevices)
-
-	devices = ffi.cast('cl_device_id*', devices)
-	if (devices == nil and numDevices > 0)
-	or (devices ~= nil and numDevices == 0)
-	then
-		return ffi.C.CL_INVALID_VALUE
-	end
-	-- make a local copy so program can hold onto it
-	local newDevices = ffi.new('cl_device_id[?]', numDevices)
-	for i=0,numDevices-1 do
-		local device, err = deviceCastAndVerify(devices[i])
-		if err then return err end
-		-- TODO if device is still building a program then return CL_INVALID_OPERATION
-		newDevices[i] = device
-	end
-	devices = newDevices
-
-	options = ffi.cast('char*', options)
-	if options ~= nil then
-		options = ffi.string(options)
-	else
-		options = nil
-	end
-	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
-
-	if notify == nil and userData ~= nil then
-		return ffi.C.CL_INVALID_VALUE
-	end
-
-	local programHandle, err = programCastAndVerify(programHandle)
-	if err then return err end
-
-	local err = ffi.C.CL_SUCCESS
-	local id = programHandle[0].id
---print('compiling program entry', id)
-	local program = programsForID[id]
-
-	-- if there are kernels attached to the program...
-	if next(program.kernels) ~= nil then
-		return ffi.C.CL_INVALID_OPERATION
-	end
-
-	--]]
-end
-
--- just obj -> exe
---cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
-function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputPrograms, notify, userData, errcodeRet)
-	error("not yet implemented")
-end
-
--- source -> obj, then obj -> exe
-function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
-	--programHandle = ffi.cast('cl_program', programHandle)
-
-	-- [[ NOTICE this all matches clCompileProgram ...
-
-	numDevices = ffi.cast('cl_uint', numDevices)
-	numDevices = tonumber(numDevices)
-
-	devices = ffi.cast('cl_device_id*', devices)
-	if (devices == nil and numDevices > 0)
-	or (devices ~= nil and numDevices == 0)
-	then
-		return ffi.C.CL_INVALID_VALUE
-	end
-	-- make a local copy so program can hold onto it
-	local newDevices = ffi.new('cl_device_id[?]', numDevices)
-	for i=0,numDevices-1 do
-		local device, err = deviceCastAndVerify(devices[i])
-		if err then return err end
-		-- TODO if device is still building a program then return CL_INVALID_OPERATION
-		newDevices[i] = device
-	end
-	devices = newDevices
-
-	options = ffi.cast('char*', options)
-	if options ~= nil then
-		options = ffi.string(options)
-	else
-		options = nil
-	end
-	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
-
-	if notify == nil and userData ~= nil then
-		return ffi.C.CL_INVALID_VALUE
-	end
-
-	local programHandle, err = programCastAndVerify(programHandle)
-	if err then return err end
-
-	local err = ffi.C.CL_SUCCESS
-	local id = programHandle[0].id
---print('compiling program entry', id)
-	local program = programsForID[id]
-
-	-- if there are kernels attached to the program...
-	if next(program.kernels) ~= nil then
-		return ffi.C.CL_INVALID_OPERATION
-	end
-
-	--]]
-
-	-- TODO if program was built with binary and devices listed in device_list do not have a valid program binary loaded then return bL_INVALID_BINARY
-	-- TODO CL_COMPILER_NOT_AVAILABLE
-
-	-- TODO CL_INVALID_OPERATION if program was not created with clCreateProgramWithSource, clCreateProgramWithIL or clCreateProgramWithBinary
-
-	-- clear results of a previous build?
-	program.lib = nil
-	program.libfile = nil
-	program.libdata = nil
-	program.compileLog = nil
-	program.linkLog = nil
-	program.numDevices = nil
-	program.devices = nil
-	program.status = ffi.C.CL_BUILD_IN_PROGRESS
-	program.options = nil
-
-	local headerCode
-	xpcall(function()
-		-- this does ...
-		-- :setup - makes the make env obj & writes code
-		-- :compile - code -> .o file
-		-- :link - .o file -> .so file
-		-- :load - loads the .so file
-		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
-		local result = gcc:build({
-			code = program.code,
-			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
-		}, {
-			-- used by gcc:link
-			currentProgramID = program.id,
-		})
-		if result.error then error(result.error) end
---print('done compiling program entry', id)
-
-		-- gcc:build calls ffi.load
-		-- so these should now be available:
+local function setupCLProgramHeader(id)
+	local headerCode 
+	local result, msg = xpcall(function()
 		headerCode = template([[
 
 //everything accessible everywhere goes here
@@ -2094,15 +1948,314 @@ void _program_<?=id?>_execMultiThread(
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 		})
 		ffi.cdef(headerCode)
+	end, function(err)
+		return err..'\n'
+			..'header code:\n'
+			..require 'template.showcode'(tostring(headerCode))..'\n'
+			..debug.traceback()
+	end)
+	-- rethrow ...
+	if not result then error(msg) end
+end
 
+-- just source -> obj
+--cl_int clCompileProgram(cl_program program, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_headers, const cl_program * input_headers, const char ** header_include_names, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data);
+function cl.clCompileProgram(programHandle, numDevices, devices, options, numInputHeaders, inputHeaders, headerIncludeNames, notify, userData)
+	-- in order to split the clBuildProgram up into compile + link, that means splitting up the ffi-c :build process into separate compile + link ...
+	-- I could do that ... or I could just pull the contents out of it (which relies on lua-make) , and just use that, and separate that into compile + link
+
+	-- [[ BEGIN matches clBuildProgram
+
+	numDevices = ffi.cast('cl_uint', numDevices)
+	numDevices = tonumber(numDevices)
+
+	devices = ffi.cast('cl_device_id*', devices)
+	if (devices == nil and numDevices > 0)
+	or (devices ~= nil and numDevices == 0)
+	then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	-- make a local copy so program can hold onto it
+	local newDevices = ffi.new('cl_device_id[?]', numDevices)
+	for i=0,numDevices-1 do
+		local device, err = deviceCastAndVerify(devices[i])
+		if err then return err end
+		-- TODO if device is still building a program then return CL_INVALID_OPERATION
+		newDevices[i] = device
+	end
+	devices = newDevices
+
+	options = ffi.cast('char*', options)
+	if options ~= nil then
+		options = ffi.string(options)
+	else
+		options = nil
+	end
+	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
+
+	if notify == nil and userData ~= nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	local programHandle, err = programCastAndVerify(programHandle)
+	if err then return err end
+
+	local err = ffi.C.CL_SUCCESS
+	local id = programHandle[0].id
+--print('compiling program entry', id)
+	local program = programsForID[id]
+
+	-- if there are kernels attached to the program...
+	if next(program.kernels) ~= nil then
+		return ffi.C.CL_INVALID_OPERATION
+	end
+
+	--]] END matches clBuildProgram
+
+	-- clear results of a previous build?
+	program.lib = nil
+	program.libfile = nil
+	program.libdata = nil
+	program.compileLog = nil
+	program.linkLog = nil
+	program.numDevices = nil
+	program.devices = nil
+	program.status = ffi.C.CL_BUILD_IN_PROGRESS
+	program.options = nil
+
+	xpcall(function()
+		local buildCtx = {}
+		buildCtx.currentProgramID = program.id	-- used by gcc:link
+		-- this does ...
+		-- :setup - makes the make env obj & writes code
+		-- :compile - code -> .o file
+		-- :link - .o file -> .so file
+		-- :load - loads the .so file
+		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
+		local args = {
+			code = program.code,
+			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
+		}
+		gcc:setup(args, buildCtx)
+		if buildCtx.error then error(buildCtx.error) end
+		gcc:compile(args, buildCtx)
+		if buildCtx.error then error(buildCtx.error) end
+--print('done compiling program entry', id)
+
+		-- save for later for when clLinkProgram is called
+		program.buildArgs = args
+		program.buildCtx = buildCtx
+	end, function(err)
+		io.stderr:write('gcc code:', '\n')
+		io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
+		io.stderr:write('error while compiling: '..tostring(err), '\n')
+		io.stderr:write(debug.traceback(), '\n')
+		io.stderr:flush()
+		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
+		program.status = ffi.C.CL_BUILD_ERROR
+	end)
+	return err
+end
+
+-- just obj -> exe
+--cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
+function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
+	
+	-- [[ BEGIN matches clBuildProgram
+	
+	numDevices = ffi.cast('cl_uint', numDevices)
+	numDevices = tonumber(numDevices)
+
+	devices = ffi.cast('cl_device_id*', devices)
+	if (devices == nil and numDevices > 0)
+	or (devices ~= nil and numDevices == 0)
+	then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	-- make a local copy so program can hold onto it
+	local newDevices = ffi.new('cl_device_id[?]', numDevices)
+	for i=0,numDevices-1 do
+		local device, err = deviceCastAndVerify(devices[i])
+		if err then return err end
+		-- TODO if device is still building a program then return CL_INVALID_OPERATION
+		newDevices[i] = device
+	end
+	devices = newDevices
+
+	options = ffi.cast('char*', options)
+	if options ~= nil then
+		options = ffi.string(options)
+	else
+		options = nil
+	end
+	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
+
+	if notify == nil and userData ~= nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	-- ]] END matches clBuildProgram
+
+	-- numInputPrograms, inputProgramHandles
+	numInputPrograms = ffi.cast('cl_uint', numInputPrograms)
+	numInputPrograms = tonumber(numInputPrograms)
+	inputProgramHandles = ffi.cast('cl_program_id*', inputProgramHandles)
+	if (inputProgramHandles == nil and numInputPrograms > 0)
+	or (inputProgramHandles ~= nil and numInputPrograms == 0)
+	then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	local programs = table()
+	for i=0,numInputPrograms-1 do
+		local programHandle, err = programCastAndVerify(inputProgramHandles[i])
+		if err then return err end
+		local id = programHandle[0].id
+		local program = programsForID[id]
+		-- if there are kernels attached to the program already...
+		if next(program.kernels) ~= nil then
+			return ffi.C.CL_INVALID_OPERATION
+		end
+		-- if the program wasn't called with clCompileProgram , or if that failed or something meh idk
+		if not program.buildCtx then
+			return ffi.C.CL_INVALID_OPERATION
+		end
+		-- TODO what about if the program succeeded as a .lib? 
+		programs:insert(program)
+	end
+
+
+	local err = ffi.C.CL_SUCCESS
+	
+	local headerCode
+	xpcall(function()
+		if #programs == 1 then
+			-- just finish the buildctx process
+			local program = programs[1]
+			local args = program.buildArgs
+			local buildCtx = program.buildCtx
+			-- TODO what about state info in here?
+			-- this is why I think I need to break apart everything...
+			gcc:link(args, buildCtx)
+			if buildCtx.error then error(buildCtx.error) end
+			gcc:load(args, buildCtx)
+			if buildCtx.error then error(buildCtx.error) end
+			
+			setupCLProgramHeader(program.id)
+		else
+			-- TODO here, how to build from other builds ...
+			-- by skipping the code / :compile part, and by overriding the :addExtraObjFiles part
+			error("only one program at a time for now")
+			local buildCtx = gcc:build({
+			})
+		end
+	end, function(err)
+		io.stderr:write('error while compiling: '..tostring(err), '\n')
+		io.stderr:write(debug.traceback(), '\n')
+		io.stderr:flush()
+		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
+		program.status = ffi.C.CL_BUILD_ERROR
+	end)
+	return err
+end
+
+-- source -> obj, then obj -> exe
+function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
+	--programHandle = ffi.cast('cl_program', programHandle)
+
+	-- [[ BEGIN matches clBuildProgram
+
+	numDevices = ffi.cast('cl_uint', numDevices)
+	numDevices = tonumber(numDevices)
+
+	devices = ffi.cast('cl_device_id*', devices)
+	if (devices == nil and numDevices > 0)
+	or (devices ~= nil and numDevices == 0)
+	then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	-- make a local copy so program can hold onto it
+	local newDevices = ffi.new('cl_device_id[?]', numDevices)
+	for i=0,numDevices-1 do
+		local device, err = deviceCastAndVerify(devices[i])
+		if err then return err end
+		-- TODO if device is still building a program then return CL_INVALID_OPERATION
+		newDevices[i] = device
+	end
+	devices = newDevices
+
+	options = ffi.cast('char*', options)
+	if options ~= nil then
+		options = ffi.string(options)
+	else
+		options = nil
+	end
+	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
+
+	if notify == nil and userData ~= nil then
+		return ffi.C.CL_INVALID_VALUE
+	end
+
+	local programHandle, err = programCastAndVerify(programHandle)
+	if err then return err end
+
+	local err = ffi.C.CL_SUCCESS
+	local id = programHandle[0].id
+--print('compiling program entry', id)
+	local program = programsForID[id]
+
+	-- if there are kernels attached to the program already...
+	if next(program.kernels) ~= nil then
+		return ffi.C.CL_INVALID_OPERATION
+	end
+
+	--]] END matches clBuildProgram
+
+	-- TODO if program was built with binary and devices listed in device_list do not have a valid program binary loaded then return bL_INVALID_BINARY
+	-- TODO CL_COMPILER_NOT_AVAILABLE
+
+	-- TODO CL_INVALID_OPERATION if program was not created with clCreateProgramWithSource, clCreateProgramWithIL or clCreateProgramWithBinary
+
+	-- clear results of a previous build?
+	program.lib = nil
+	program.libfile = nil
+	program.libdata = nil
+	program.compileLog = nil
+	program.linkLog = nil
+	program.numDevices = nil
+	program.devices = nil
+	program.status = ffi.C.CL_BUILD_IN_PROGRESS
+	program.options = nil
+
+	xpcall(function()
+		-- this does ...
+		-- :setup - makes the make env obj & writes code
+		-- :compile - code -> .o file
+		-- :link - .o file -> .so file
+		-- :load - loads the .so file
+		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
+		local buildCtx = gcc:build({
+			code = program.code,
+			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
+		}, {
+			-- used by gcc:link
+			currentProgramID = program.id,
+		})
+		if buildCtx.error then error(buildCtx.error) end
+--print('done compiling program entry', id)
+
+		-- gcc:build calls ffi.load
+		-- so these should now be available:
+		setupCLProgramHeader(id)
+		
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
-		local libdata = assert(path(result.libfile):read(), "couldn't open file "..result.libfile)
+		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
 
-		program.lib = result.lib
-		program.libfile = result.libfile
+		program.lib = buildCtx.lib
+		program.libfile = buildCtx.libfile
 		program.libdata = libdata
-		program.compileLog = result.compileLog
-		program.linkLog = result.linkLog
+		program.compileLog = buildCtx.compileLog
+		program.linkLog = buildCtx.linkLog
 		program.numDevices = numDevices
 		program.devices = programDevices
 		program.status = ffi.C.CL_BUILD_SUCCESS
@@ -2111,8 +2264,6 @@ void _program_<?=id?>_execMultiThread(
 	end, function(err)
 		io.stderr:write('gcc code:', '\n')
 		io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
-		io.stderr:write('header code:', '\n')
-		io.stderr:write(require 'template.showcode'(tostring(headerCode)), '\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
