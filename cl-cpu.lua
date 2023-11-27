@@ -1560,6 +1560,7 @@ end
 
 -- hack for forcing cpp format which is found in cl-cpu/run.lua:
 cl.useCpp = false
+cl.extraInclude = table()
 local buildEnv
 function cl:getBuildEnv()
 	if buildEnv then return buildEnv end
@@ -2038,6 +2039,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 	xpcall(function()
 		local buildCtx = {}
 		buildCtx.currentProgramID = program.id	-- used by buildEnv:link
+		buildCtx.include = cl.extraInclude
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
 		-- :compile - code -> .o file
@@ -2256,6 +2258,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		}, {
 			-- used by buildEnv:link
 			currentProgramID = program.id,
+			include = cl.extraInclude,
 		})
 		if buildCtx.error then error(buildCtx.error) end
 --print('done compiling program entry', id)
