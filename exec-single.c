@@ -148,6 +148,19 @@ extern size_t _program_<?=id?>_currentthreadindex();
 #define get_local_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].local_id[n]
 #define get_group_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].group_id[n]
 
+#if defined(__cplusplus)
+
+inline int4 operator+(int4 const & a, int4 const & b) {
+	return int4{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
+}
+inline int4 operator*(int const a, int4 const & b) {
+	return int4{a * b.x, a * b.y, a * b.z, a * b.w};
+}
+inline int4 operator*(int4 const & a, int const b) {
+	return int4{a.x * b, a.y * b, a.z * b, a.w * b};
+}
+
+#else	//__cplusplus
 
 static int4 int4_add(int4 a, int4 b) {
 	return (int4){
@@ -158,16 +171,6 @@ static int4 int4_add(int4 a, int4 b) {
 	};
 }
 
-#if defined(__cplusplus)
-inline int4 operator+(int4 const & a, int4 const & b) {
-	return int4{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
-}
-inline int4 operator*(int const a, int4 const & b) {
-	return int4{a * b.x, a * b.y, a * b.z, a * b.w};
-}
-inline int4 operator*(int4 const & a, int const b) {
-	return int4{a.x * b, a.y * b, a.z * b, a.w * b};
-}
 #endif	//__cplusplus
 
 // TODO should include isfinite(x) ? NAN : ...
