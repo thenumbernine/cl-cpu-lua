@@ -14,7 +14,9 @@ local function run(...)
 		return run(select(2, ...))
 	elseif x == '-I' then
 		-- TODO how about we just pass args to compiler
-		clcpu.extraInclude:insert((assert(select(2, ...), "expected -I <include dirs> (;-separated)")))
+		local inc = assert(select(2, ...), "expected -I <include dirs> (;-separated)")
+		local path = require 'ext.path'
+		clcpu.extraInclude:insert(path(inc):abs().path)
 		return run(select(3, ...))
 	end
 	-- else ...
