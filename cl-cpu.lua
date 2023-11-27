@@ -1558,76 +1558,88 @@ end
 
 -- PROGRAM
 
+-- hack for forcing cpp format which is found in cl-cpu/run.lua:
+cl.useCpp = false
+local buildEnv
+function cl:getBuildEnv()
+	if buildEnv then return buildEnv end
 
--- using ffi-c is convenient so long as the compile + link are done together ...
--- but if I want to separate them, I'll have so do this myself ...
--- [[
--- c fails on arith ops for vector types
-local gcc = require 'ffi-c.c'
--- c++ fails on field initialization
---local gcc = require 'ffi-c.cpp'
-
--- called from gcc:link stage
-function gcc:addExtraObjFiles(objfiles, buildCtx)
-	if cl.clcpu_kernelCallMethod == 'C-multithread' then
-
-		-- TODO replace buildCtx.srcfile's suffix from self.srcSuffix to _multi .. self.srcSuffix
-		local name = self:getBuildDir()..'/'..buildCtx.name..'_multi'
-
-		local pushcompiler = buildCtx.env.compiler
-		local pushcppver = buildCtx.env.cppver
-		buildCtx.env.compiler = 'g++'
-
-		-- TODO this has to be done before postConfig()
-		-- or else it won't get baked into the compileFlags
-		-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
-		buildCtx.env.cppver = 'c++20'
-		-- so just do this
-		local pushcflags = buildCtx.env.compileFlags
-		buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++17')
-
-		-- I could use templates
-		-- I was using templates
-		-- but I need to pass the values through into the included file where the cl-cpu structs are
-		-- and I can't do that with templates (unless I further inline-and-template)
-		-- so instead I'll use macros
-		local nmacros = #buildCtx.env.macros
-		--buildCtx.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
-		--buildCtx.env.macros:insert('CLCPU_NUMCORES='..numcores)
-		-- on second thought, I can't use macros in the luajit ffi.cdef
-		-- so for that i'd have to replace stuff anyways
-		-- so meh might as well just use templates
-
-		local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
-		local srcfile = name..'.cpp'
-		local objfile = name..buildCtx.env.objSuffix
-
-		-- generate the file from the templated file
-		assert(path(srcfile):write(template(assert(path(srcsrcfile):read()), {
-			id = buildCtx.currentProgramID,
-			numcores = numcores,
-			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-			ffi_all_types = ffi_all_types,
-		})))
-
-		buildCtx.env.objLogFile = name..'-obj.log'	-- what's this for again?
-		local status, compileLog = buildCtx.env:buildObj(objfile, srcfile)
-		buildCtx.compileLog = buildCtx.compileLog..compileLog
-		if not status then
-			buildCtx.error = "failed to build c code"
-			error'here'	-- throwing away errors?
-			--return buildCtx
-		end
-
-		objfiles:insert(objfile)
-
-		buildCtx.env.macros = buildCtx.env.macros:sub(1, nmacros)
-
-		buildCtx.env.compiler = pushcompiler
-		buildCtx.env.cppver = pushcppver
-		buildCtx.env.compileFlags = pushcflags
+	-- using ffi-c is convenient so long as the compile + link are done together ...
+	-- but if I want to separate them, I'll have so do this myself ...
+	-- [[
+	if self.useCpp then
+		-- c++ fails on field initialization
+		buildEnv = require 'ffi-c.cpp'
+	else
+		-- c fails on arith ops for vector types
+		buildEnv = require 'ffi-c.c'
 	end
+
+	-- called from buildEnv:link stage
+	function buildEnv:addExtraObjFiles(objfiles, buildCtx)
+		if cl.clcpu_kernelCallMethod == 'C-multithread' then
+
+			-- TODO replace buildCtx.srcfile's suffix from self.srcSuffix to _multi .. self.srcSuffix
+			local name = self:getBuildDir()..'/'..buildCtx.name..'_multi'
+
+			local pushcompiler = buildCtx.env.compiler
+			local pushcppver = buildCtx.env.cppver
+			buildCtx.env.compiler = 'g++'
+
+			-- TODO this has to be done before postConfig()
+			-- or else it won't get baked into the compileFlags
+			-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
+			buildCtx.env.cppver = 'c++20'
+			-- so just do this
+			local pushcflags = buildCtx.env.compileFlags
+			buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++17')
+
+			-- I could use templates
+			-- I was using templates
+			-- but I need to pass the values through into the included file where the cl-cpu structs are
+			-- and I can't do that with templates (unless I further inline-and-template)
+			-- so instead I'll use macros
+			local nmacros = #buildCtx.env.macros
+			--buildCtx.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
+			--buildCtx.env.macros:insert('CLCPU_NUMCORES='..numcores)
+			-- on second thought, I can't use macros in the luajit ffi.cdef
+			-- so for that i'd have to replace stuff anyways
+			-- so meh might as well just use templates
+
+			local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
+			local srcfile = name..'.cpp'
+			local objfile = name..buildCtx.env.objSuffix
+
+			-- generate the file from the templated file
+			assert(path(srcfile):write(template(assert(path(srcsrcfile):read()), {
+				id = buildCtx.currentProgramID,
+				numcores = numcores,
+				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+				ffi_all_types = ffi_all_types,
+			})))
+
+			buildCtx.env.objLogFile = name..'-obj.log'	-- what's this for again?
+			local status, compileLog = buildCtx.env:buildObj(objfile, srcfile)
+			buildCtx.compileLog = buildCtx.compileLog..compileLog
+			if not status then
+				buildCtx.error = "failed to build c code"
+				error'here'	-- throwing away errors?
+				--return buildCtx
+			end
+
+			objfiles:insert(objfile)
+
+			buildCtx.env.macros = buildCtx.env.macros:sub(1, nmacros)
+
+			buildCtx.env.compiler = pushcompiler
+			buildCtx.env.cppver = pushcppver
+			buildCtx.env.compileFlags = pushcflags
+		end
+	end
+
+	return buildEnv
 end
+
 --]]
 --[[ so this is a more flexible version ...
 -- maybe this should replace ffi-c ?
@@ -2025,7 +2037,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 
 	xpcall(function()
 		local buildCtx = {}
-		buildCtx.currentProgramID = program.id	-- used by gcc:link
+		buildCtx.currentProgramID = program.id	-- used by buildEnv:link
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
 		-- :compile - code -> .o file
@@ -2036,9 +2048,10 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 			code = program.code,
 			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
 		}
-		gcc:setup(args, buildCtx)
+		local buildEnv = cl:getBuildEnv()
+		buildEnv:setup(args, buildCtx)
 		if buildCtx.error then error(buildCtx.error) end
-		gcc:compile(args, buildCtx)
+		buildEnv:compile(args, buildCtx)
 		if buildCtx.error then error(buildCtx.error) end
 --print('done compiling program entry', id)
 
@@ -2046,7 +2059,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		program.buildArgs = args
 		program.buildCtx = buildCtx
 	end, function(err)
-		io.stderr:write('gcc code:', '\n')
+		io.stderr:write('code:', '\n')
 		io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
@@ -2129,6 +2142,7 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	
 	local headerCode
 	xpcall(function()
+		local buildEnv = cl:getBuildEnv()
 		if #programs == 1 then
 			-- just finish the buildctx process
 			local program = programs[1]
@@ -2136,9 +2150,9 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 			local buildCtx = program.buildCtx
 			-- TODO what about state info in here?
 			-- this is why I think I need to break apart everything...
-			gcc:link(args, buildCtx)
+			buildEnv:link(args, buildCtx)
 			if buildCtx.error then error(buildCtx.error) end
-			gcc:load(args, buildCtx)
+			buildEnv:load(args, buildCtx)
 			if buildCtx.error then error(buildCtx.error) end
 			
 			setupCLProgramHeader(program.id)
@@ -2146,7 +2160,8 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 			-- TODO here, how to build from other builds ...
 			-- by skipping the code / :compile part, and by overriding the :addExtraObjFiles part
 			error("only one program at a time for now")
-			local buildCtx = gcc:build({
+			local buildCtx = buildEnv:build({
+				error'you are here'
 			})
 		end
 	end, function(err)
@@ -2228,23 +2243,24 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	program.options = nil
 
 	xpcall(function()
+		local buildEnv = cl:getBuildEnv()
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
 		-- :compile - code -> .o file
 		-- :link - .o file -> .so file
 		-- :load - loads the .so file
 		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
-		local buildCtx = gcc:build({
+		local buildCtx = buildEnv:build({
 			code = program.code,
 			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
 		}, {
-			-- used by gcc:link
+			-- used by buildEnv:link
 			currentProgramID = program.id,
 		})
 		if buildCtx.error then error(buildCtx.error) end
 --print('done compiling program entry', id)
 
-		-- gcc:build calls ffi.load
+		-- buildEnv:build calls ffi.load
 		-- so these should now be available:
 		setupCLProgramHeader(id)
 		
@@ -2262,7 +2278,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		program.options = options
 
 	end, function(err)
-		io.stderr:write('gcc code:', '\n')
+		io.stderr:write('code:', '\n')
 		io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
@@ -3076,7 +3092,7 @@ cl.clGetEventProfilingInfo = makeGetter{
 	},
 }
 
---[[ cleanup gcc libtmp on exit?
+--[[ cleanup buildEnv libtmp on exit?
 -- TODO shouldn't the ffi-c do this?
 local GCWrapper = require 'ffi.gcwrapper.gcwrapper'
 cl.cleanup = class(GCWrapper{
