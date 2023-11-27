@@ -22,22 +22,32 @@ if ffi.os == 'Windows' then
 end
 ?>
 
+
+#if !defined(__cplusplus)
+
 #define constant
 #define global
 #define local
 
-#if !defined(__cplusplus)
 typedef char bool;
 #define true 1
 #define false 0
-#endif
-
-#include <stddef.h>
 
 //unlike CL, C cannot handle function overloading
 #define max(a,b) ((a) > (b) ? (a) : (b))
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #define clamp(x,_min,_max)	min(_max,max(_min,x))
+
+#else	//__cplusplus
+
+#include <algorithm>
+using std::clamp;
+using std::min;
+using std::max;
+
+#endif	//__cplusplus
+
+#include <stddef.h>
 
 //TODO
 #define CLK_LOCAL_MEM_FENCE	0

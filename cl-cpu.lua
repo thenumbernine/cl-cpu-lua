@@ -1593,7 +1593,7 @@ function cl:getBuildEnv()
 			buildCtx.env.cppver = 'c++20'
 			-- so just do this
 			local pushcflags = buildCtx.env.compileFlags
-			buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++17')
+			buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++20')
 
 			-- I could use templates
 			-- I was using templates
@@ -2040,6 +2040,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		local buildCtx = {}
 		buildCtx.currentProgramID = program.id	-- used by buildEnv:link
 		buildCtx.include = cl.extraInclude
+		buildCtx.cppver = cl.useCpp and 'c++20' or nil
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
 		-- :compile - code -> .o file
@@ -2259,6 +2260,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 			-- used by buildEnv:link
 			currentProgramID = program.id,
 			include = cl.extraInclude,
+			cppver = cl.useCpp and 'c++20' or nil,
 		})
 		if buildCtx.error then error(buildCtx.error) end
 --print('done compiling program entry', id)
