@@ -10,6 +10,7 @@ local function run(...)
 	-- handle any args?
 	if x == "-cpp" then
 		require 'ffi.req' 'OpenCL'.useCpp = true
+		return run(select(2, ...))
 	end
 	-- else ...
 	local filename = ...
@@ -17,4 +18,3 @@ local function run(...)
 end
 
 run(...)
-
