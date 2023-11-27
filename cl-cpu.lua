@@ -1848,11 +1848,26 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 end
 
 function cl.clCreateProgramWithBinary(ctx, numDevices, devices, lengths, binaries, binaryStatus, errcodeRets)
+	-- TODO an easy implementation would be to just return a string for the binary
+	-- but it gets more difficult if you want to support programs as binary-obj, binary-lib, binary-exe ... then you should also keep track of which one the clprogram is ...
 	error("not yet implemented")
 end
 
 cl.clcpu_build = 'release'
 
+-- just source -> obj
+--cl_int clCompileProgram(cl_program program, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_headers, const cl_program * input_headers, const char ** header_include_names, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data);
+function cl.clCompileProgram(program, numDevices, devices, options, numInputHeaders, inputHeaders, headerIncludeNames, notify, userData)
+	error("not yet implemented")
+end
+
+-- just obj -> exe
+--cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
+function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputPrograms, notify, userData, errcodeRet)
+	error("not yet implemented")
+end
+
+-- source -> obj, then obj -> exe
 function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
 	--programHandle = ffi.cast('cl_program', programHandle)
 	numDevices = ffi.cast('cl_uint', numDevices)
