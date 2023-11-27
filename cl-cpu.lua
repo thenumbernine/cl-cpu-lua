@@ -1571,36 +1571,36 @@ local gcc = require 'ffi-c.c'
 function gcc:addExtraObjFiles(objfiles, buildCtx)
 	if cl.clcpu_kernelCallMethod == 'C-multithread' then
 
-		local libIndex = #self.libfiles
-		local name = self:getBuildDir()..'/libtmp_'..self.cobjIndex..'_'..libIndex..'_multi'
+		-- TODO replace buildCtx.srcfile's suffix from self.srcSuffix to _multi .. self.srcSuffix
+		local name = self:getBuildDir()..'/'..buildCtx.name..'_multi'
 
-		local pushcompiler = self.env.compiler
-		local pushcppver = self.env.cppver
-		self.env.compiler = 'g++'
+		local pushcompiler = buildCtx.env.compiler
+		local pushcppver = buildCtx.env.cppver
+		buildCtx.env.compiler = 'g++'
 
 		-- TODO this has to be done before postConfig()
 		-- or else it won't get baked into the compileFlags
 		-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
-		self.env.cppver = 'c++17'
+		buildCtx.env.cppver = 'c++20'
 		-- so just do this
-		local pushcflags = self.env.compileFlags
-		self.env.compileFlags = self.env.compileFlags:gsub('std=c11', 'std=c++17')
+		local pushcflags = buildCtx.env.compileFlags
+		buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++17')
 
 		-- I could use templates
 		-- I was using templates
 		-- but I need to pass the values through into the included file where the cl-cpu structs are
 		-- and I can't do that with templates (unless I further inline-and-template)
 		-- so instead I'll use macros
-		local nmacros = #self.env.macros
-		--self.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
-		--self.env.macros:insert('CLCPU_NUMCORES='..numcores)
+		local nmacros = #buildCtx.env.macros
+		--buildCtx.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
+		--buildCtx.env.macros:insert('CLCPU_NUMCORES='..numcores)
 		-- on second thought, I can't use macros in the luajit ffi.cdef
 		-- so for that i'd have to replace stuff anyways
 		-- so meh might as well just use templates
 
 		local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
 		local srcfile = name..'.cpp'
-		local objfile = name..self.env.objSuffix
+		local objfile = name..buildCtx.env.objSuffix
 
 		-- generate the file from the templated file
 		assert(path(srcfile):write(template(assert(path(srcsrcfile):read()), {
@@ -1610,8 +1610,8 @@ function gcc:addExtraObjFiles(objfiles, buildCtx)
 			ffi_all_types = ffi_all_types,
 		})))
 
-		self.env.objLogFile = name..'-obj.log'	-- what's this for again?
-		local status, compileLog = self.env:buildObj(objfile, srcfile)
+		buildCtx.env.objLogFile = name..'-obj.log'	-- what's this for again?
+		local status, compileLog = buildCtx.env:buildObj(objfile, srcfile)
 		buildCtx.compileLog = buildCtx.compileLog..compileLog
 		if not status then
 			buildCtx.error = "failed to build c code"
@@ -1621,11 +1621,11 @@ function gcc:addExtraObjFiles(objfiles, buildCtx)
 
 		objfiles:insert(objfile)
 
-		self.env.macros =self.env.macros:sub(1, nmacros)
+		buildCtx.env.macros = buildCtx.env.macros:sub(1, nmacros)
 
-		self.env.compiler = pushcompiler
-		self.env.cppver = pushcppver
-		self.env.compileFlags = pushcflags
+		buildCtx.env.compiler = pushcompiler
+		buildCtx.env.cppver = pushcppver
+		buildCtx.env.compileFlags = pushcflags
 	end
 end
 --]]
