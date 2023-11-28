@@ -2,6 +2,7 @@ local ffi = require 'ffi'
 local table = require 'ext.table'
 local path = require 'ext.path'
 local string = require 'ext.string'
+local io = require 'ext.io'
 local template = require 'template'
 
 require 'ffi.req' 'c.stdlib'	-- rand()
@@ -635,6 +636,12 @@ struct _cl_kernel {
 	int id;				//unique id, lookup into kernelsForID lua table
 };
 
+// start of 1.2 stuff
+// not sure where to put it or how to organize this ...
+enum {
+	CL_PROGRAM_NUM_KERNELS                      = 0x1167,
+	CL_PROGRAM_KERNEL_NAMES                     = 0x1168,
+};
 ]]
 
 -- id is usually a cl_* which is typedef'd to a struct _cl_* *, so it's essentially a void*
@@ -646,7 +653,7 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 --print(debug.traceback())
 	if args.idcast then
 		local err
-		id, err = args.idcast(id)
+		id, err = args.idcast(id)	-- segfault for getting kernel names ...
 		if err then return err end
 	end
 
@@ -1688,6 +1695,14 @@ end
 function cl.clRetainProgram(programHandle) end
 function cl.clReleaseProgram(programHandle) end
 
+local function getSymbols(soname)
+	local out = io.readproc(table{
+		'nm -D -f just-symbols',
+		path(program.libfile):escape(),
+	}:concat', ')
+	return string.split(string.trim(out), '\n')
+end
+
 cl.clGetProgramInfo = makeGetter{
 	name = 'clGetProgramInfo',
 	infotype = 'cl_program_info',
@@ -1749,8 +1764,34 @@ cl.clGetProgramInfo = makeGetter{
 		end,
 	},
 	-- 1.2:
-	--[ffi.C.CL_PROGRAM_NUM_KERNELS] = size_t,
-	--[ffi.C.CL_PROGRAM_KERNEL_NAMES] = char[],
+	[ffi.C.CL_PROGRAM_NUM_KERNELS] = {
+		type = 'size_t',
+		get = function(programHandle)
+print(programHandle)
+print'getting program for handle'
+			local program = assert(programsForID[programHandle[0].id])
+print(program)
+print(program.libname)
+			local symbols = getSymbols(program.libname)
+print(symbols)
+print(#symbols)
+			return #symbols
+		end,
+	},
+	[ffi.C.CL_PROGRAM_KERNEL_NAMES] = {
+		type = 'char[]',
+		getString = function(programHandle)
+print(programHandle)
+print'getting program for handle'
+			local program = assert(programsForID[programHandle[0].id])
+print(program)
+print(program.libname)
+			local symbols = getSymbols(program.libname)
+print(symbols)
+print(symbols:concat';')
+			return symbols:concat';'
+		end,
+	},
 	-- 2.1:
 	--[ffi.C.CL_PROGRAM_IL] = char[]
 	-- 2.2:
@@ -1850,7 +1891,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 --print('replacing realtype '..realtype)
 			code = code:gsub('%(real'..n..'%)', '('..realtype..n..')')
 		end
-		
+
 		if cl.useCpp then	-- convert .cl to .cpp
 			for _,base in ipairs(vectorTypes) do
 				code = code:gsub('%('..base..n..'%)%(', base..n..'(')
@@ -1903,7 +1944,7 @@ end
 cl.clcpu_build = 'release'
 
 local function setupCLProgramHeader(id)
-	local headerCode 
+	local headerCode
 	local result, msg = xpcall(function()
 		headerCode = template([[
 
@@ -2085,9 +2126,9 @@ end
 -- just obj -> exe
 --cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
 function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
-	
+
 	-- [[ BEGIN matches clBuildProgram
-	
+
 	numDevices = ffi.cast('cl_uint', numDevices)
 	numDevices = tonumber(numDevices)
 
@@ -2095,13 +2136,17 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	if (devices == nil and numDevices > 0)
 	or (devices ~= nil and numDevices == 0)
 	then
-		return ffi.C.CL_INVALID_VALUE
+		if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_VALUE end
+		return ffi.cast('cl_program', nil)
 	end
 	-- make a local copy so program can hold onto it
 	local newDevices = ffi.new('cl_device_id[?]', numDevices)
 	for i=0,numDevices-1 do
 		local device, err = deviceCastAndVerify(devices[i])
-		if err then return err end
+		if err then
+			if errcodeRet then errcodeRet[0] = err end
+			return ffi.cast('cl_program', nil)
+		end
 		-- TODO if device is still building a program then return CL_INVALID_OPERATION
 		newDevices[i] = device
 	end
@@ -2116,7 +2161,8 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
 
 	if notify == nil and userData ~= nil then
-		return ffi.C.CL_INVALID_VALUE
+		if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_VALUE end
+		return ffi.cast('cl_program', nil)
 	end
 
 	-- ]] END matches clBuildProgram
@@ -2128,30 +2174,36 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	if (inputProgramHandles == nil and numInputPrograms > 0)
 	or (inputProgramHandles ~= nil and numInputPrograms == 0)
 	then
-		return ffi.C.CL_INVALID_VALUE
+		if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_VALUE end
+		return ffi.cast('cl_program', nil)
 	end
 
 	local programs = table()
 	for i=0,numInputPrograms-1 do
 		local programHandle, err = programCastAndVerify(inputProgramHandles[i])
-		if err then return err end
+		if err then
+			if errcodeRet then errcodeRet[0] = err end
+			return ffi.cast('cl_program', nil)
+		end
 		local id = programHandle[0].id
 		local program = programsForID[id]
 		-- if there are kernels attached to the program already...
 		if next(program.kernels) ~= nil then
-			return ffi.C.CL_INVALID_OPERATION
+			if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_OPERATION end
+			return ffi.cast('cl_program', nil)
 		end
 		-- if the program wasn't called with clCompileProgram , or if that failed or something meh idk
 		if not program.buildCtx then
-			return ffi.C.CL_INVALID_OPERATION
+			if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_OPERATION end
+			return ffi.cast('cl_program', nil)
 		end
-		-- TODO what about if the program succeeded as a .lib? 
+		-- TODO what about if the program succeeded as a .lib?
 		programs:insert(program)
 	end
 
 
 	local err = ffi.C.CL_SUCCESS
-	
+
 	local headerCode
 	xpcall(function()
 		local buildEnv = cl:getBuildEnv()
@@ -2166,7 +2218,7 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 			if buildCtx.error then error(buildCtx.error) end
 			buildEnv:load(args, buildCtx)
 			if buildCtx.error then error(buildCtx.error) end
-			
+
 			setupCLProgramHeader(program.id)
 		else
 			-- TODO here, how to build from other builds ...
@@ -2183,7 +2235,10 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
-	return err
+
+error("need to make a new cl_program and return it...")
+	if errcodeRet then errcodeRet[0] = err end
+	return new_program_id
 end
 
 -- source -> obj, then obj -> exe
@@ -2277,7 +2332,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- buildEnv:build calls ffi.load
 		-- so these should now be available:
 		setupCLProgramHeader(id)
-		
+
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
 
