@@ -1806,7 +1806,7 @@ end
 cl.useCpp = false
 cl.extraInclude = table()
 local buildEnv
-local ffiSetterLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
+local clcpuGlobalLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
 function cl:getBuildEnv()
 	if buildEnv then return buildEnv end
 
@@ -1826,7 +1826,7 @@ function cl:getBuildEnv()
 	function buildEnv:cleanup() end
 
 	-- while we're here, do this once ... and with C only
-	ffiSetterLib = require 'ffi-c.c':build(template([[
+	clcpuGlobalLib = require 'ffi-c.c':build(template([[
 #include <ffi.h>
 
 // TODO maybe put these in their own library or something?
@@ -2443,7 +2443,7 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 		-- ... don't compile ...
 		function buildEnv:addExtraObjFiles(objfiles)
 			for i=#objfiles,1,-1 do objfiles[i] = nil end
-			objfiles:insert((assert(ffiSetterLib.objfile)))
+			objfiles:insert((assert(clcpuGlobalLib.objfile)))
 			objfiles:append(programs:mapi(function(srcProgram)
 				return (assert(srcProgram.buildCtx.objfile))
 			end))
@@ -2626,7 +2626,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 				buildCtx.env.compileFlags = pushcflags
 			end
 
-			objfiles:insert((assert(ffiSetterLib.objfile)))
+			objfiles:insert((assert(clcpuGlobalLib.objfile)))
 		end
 
 		-- this does ...
