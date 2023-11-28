@@ -1047,30 +1047,29 @@ local function prepareArgsDevices(numDevices, devices)
 	return cl.CL_SUCCESS, devices, numDevices
 end
 
-function cl.clCreateContext(properties, numDevices, devices, notify, userData, errPtr)
+function cl.clCreateContext(properties, numDevices, devices, notify, userData, errcodeRet)
 	properties = ffi.cast('cl_context_properties*', properties)
 	numDevices = ffi.cast('cl_uint', numDevices)
 	devices = ffi.cast('cl_device_id*', devices)
-	errPtr = ffi.cast('cl_int*', errPtr)
+	
+	errcodeRet = ffi.cast('cl_int*', errcodeRet)
+	local function returnError(err, ret)
+		if errcodeRet ~= nil then errcodeRet[0] = err end
+		return ffi.cast('cl_context', ret)
+ 	end
+	
 	-- if 'properties' is invalid, or if 'properties' is null and no platform could be selected, then return CL_INVALID_PLATFORM
 	-- if any value in 'properties' is not a valid name then return CL_INVALID_VALUE
 	for i=0,tonumber(numDevices)-1 do
 		local device, err = deviceCastAndVerify(devices[i])
 		if err then
-			if errPtr ~= nil then
-				errPtr[0] = ffi.C.CL_SUCCESS
-			end
-			return ffi.cast('cl_context', nil)
+			return returnError(ffi.C.CL_SUCCESS)	-- ... success?
 		end
 		-- if the device isn't available then return CL_DEVICE_NOT_AVAILABLE
 	end
 	-- notify is a callback ...
 	-- userData is userdata for the notify()
-	if errPtr ~= nil then
-		errPtr[0] = ffi.C.CL_SUCCESS
-	end
-	local ctx = allContexts[1]
-	return ctx
+	return returnError(ffi.C.CL_SUCCESS, allContexts[1])
 end
 
 
@@ -1193,20 +1192,22 @@ which I have typecast to a _cl_mem*
 and so in luajit I'm returning a _cl_mem[1]
 so that it will act like a _cl_mem*
 --]]
-function cl.clCreateBuffer(ctx, flags, size, hostPtr, errPtr)
+function cl.clCreateBuffer(ctx, flags, size, hostPtr, errcodeRet)
 	--ctx = ffi.cast('cl_context', ctx)
 	flags = ffi.cast('cl_mem_flags', flags)
 	size = ffi.cast('size_t', size)
 	hostPtr = ffi.cast('void*', hostPtr)
-	errPtr = ffi.cast('cl_int*', errPtr)
---print('clCreateBuffer', ctx, flags, size, hostPtr, errPtr)
+--print('clCreateBuffer', ctx, flags, size, hostPtr, errcodeRet)
+
+	errcodeRet = ffi.cast('cl_int*', errcodeRet)
+	local function returnError(err, ret)
+		if errcodeRet ~= nil then errcodeRet[0] = err end
+		return ffi.cast('cl_mem', ret)
+ 	end
 
 	local ctx, err = contextCastAndVerify(ctx)
 	if err then
-		if errPtr ~= nil then
-			errPtr[0] = err
-		end
-		return ffi.cast('cl_mem', nil)
+		return returnError(err)
 	end
 
 	if bit.band(flags, bit.bnot(bit.bor(
@@ -1217,29 +1218,20 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errPtr)
 		ffi.C.CL_MEM_ALLOC_HOST_PTR,
 		ffi.C.CL_MEM_COPY_HOST_PTR
 	))) ~= 0 then
-		if errPtr ~= nil then
-			errPtr[0] = ffi.C.CL_INVALID_VALUE
-		end
-		return ffi.cast('cl_mem', nil)
+		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 
 	if size == 0
 	or size > clDeviceMaxMemAllocSize
 	then
-		if errPtr ~= nil then
-			errPtr[0] = ffi.C.CL_INVALID_BUFFER_SIZE
-		end
-		return ffi.cast('cl_mem', nil)
+		return returnError(ffi.C.CL_INVALID_BUFFER_SIZE)
 	end
 
 	local reqHost = bit.band(flags, bit.bor(ffi.C.CL_MEM_USE_HOST_PTR, ffi.C.CL_MEM_COPY_HOST_PTR)) ~= 0
 	if (reqHost and hostPtr == nil)
 	or (not reqHost and hostPtr ~= nil)
 	then
-		if errPtr ~= nil then
-			errPtr[0] = ffi.C.CL_INVALID_HOST_PTR
-		end
-		return ffi.cast('cl_mem', nil)
+		return returnError(ffi.C.CL_INVALID_HOST_PTR)
 	end
 
 	local mem = ffi.new'struct _cl_mem[1]'
@@ -1260,10 +1252,8 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errPtr)
 
 	if reqHost then ffi.copy(mem[0].ptr, hostPtr, size) end
 
-	if errPtr ~= nil then
-		errPtr[0] = ffi.C.CL_SUCCESS
-	end
-	return ffi.cast('cl_mem', mem)	-- return the ptr, not the obj, so ffi.sizeof says it's a ptr size, not the obj size (which is double)
+	return returnError(ffi.C.CL_SUCCESS, mem)
+	-- return the ptr, not the obj, so ffi.sizeof says it's a ptr size, not the obj size (which is double)
 end
 
 
@@ -1293,40 +1283,36 @@ end
 function cl.clRetainCommandQueue(cmds) end
 function cl.clReleaseCommandQueue(cmds) end
 
-function cl.clCreateCommandQueue(ctx, device, properties, errPtr)
+function cl.clCreateCommandQueue(ctx, device, properties, errcodeRet)
 	--ctx = ffi.cast('cl_context', ctx)
 	--device = ffi.cast('cl_device_id', device)
 	properties = ffi.cast('cl_command_queue_properties', properties)
-	errPtr = ffi.cast('cl_int*', errPtr)
+
+	errcodeRet = ffi.cast('cl_int*', errcodeRet)
+	local function returnError(err, ret)
+		if errcodeRet ~= nil then errcodeRet[0] = err end
+		return ffi.cast('cl_command_queue', ret)
+ 	end
 
 	local ctx, err = contextCastAndVerify(ctx)
 	if err then
-		if errPtr ~= nil then
-			errPtr[0] = err
-		end
-		return ffi.cast('cl_command_queue', nil)
+		return returnError(err)
 	end
 
 	local device, err = deviceCastAndVerify(device)
 	if err then
-		if errPtr ~= nil then
-			errPtr[0] = err
-		end
-		return ffi.cast('cl_command_queue', nil)
+		return returnError(err)
 	end
 
 	-- if the values in properties are invalid then return CL_INVALID_VALUE
 	-- if the values in properties are valid, but not supported by the device, return CL_INVALID_QUEUE_PROPERTIES
 
-	if errPtr ~= nil then
-		errPtr[0] = ffi.C.CL_SUCCESS
-	end
-
 	local cmds = ffi.cast('cl_command_queue', allCmds[1])
 	cmds[0].ctx = ctx
 	cmds[0].device = device
 	cmds[0].properties = properties
-	return cmds
+	
+	return returnError(ffi.C.CL_SUCCESS, cmds)
 end
 
 cl.clGetCommandQueueInfo = makeGetter{
@@ -1832,19 +1818,21 @@ function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, result
 	}, programHandle, name, paramSize, resultPtr, sizePtr, device)
 end
 
-function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, errPtr)
+function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, errcodeRet)
 	--ctx = ffi.cast('cl_context', ctx)
 	numStrings = ffi.cast('cl_uint', numStrings)
 	stringsPtr = ffi.cast('char**', stringsPtr)
 	lengthsPtr = ffi.cast('size_t*', lengthsPtr)
-	errPtr = ffi.cast('cl_int*', errPtr)
+	
+	errcodeRet = ffi.cast('cl_int*', errcodeRet)
+	local function returnError(err, ret)
+		if errcodeRet ~= nil then errcodeRet[0] = err end
+		return ffi.cast('cl_program', ret)
+ 	end
 
 	local ctx, err = contextCastAndVerify(ctx)
 	if err then
-		if errPtr ~= nil then
-			errPtr[0] = err
-		end
-		return ffi.cast('cl_program', nil)
+		return returnError(err)
 	end
 
 	-- I'm creating the program entry up front
@@ -1920,10 +1908,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	}
 	programsForID[id] = program
 
-	if errPtr ~= nil then
-		errPtr[0] = ffi.C.CL_SUCCESS
-	end
-	return ffi.cast('cl_program', programHandle)
+	return returnError(ffi.C.CL_SUCCESS, programHandle)
 end
 
 -- defined later in the kernel section
@@ -2111,11 +2096,10 @@ end
 -- just obj -> exe
 --cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
 function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
-	local function returnError(err, program)
+	errcodeRet = ffi.cast('cl_int*', errcodeRet)
+	local function returnError(err, ret)
 		if errcodeRet ~= nil then errcodeRet[0] = err end
-		-- program can be nil or a cl_program.
-		-- for nil / null (default), cast and return
-		return ffi.cast('cl_program', program)
+		return ffi.cast('cl_program', ret)
  	end
 
 	local ctx, err = contextCastAndVerify(ctx)
@@ -2169,11 +2153,13 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 		local id = programHandle[0].id
 		local program = programsForID[id]
 		-- if there are kernels attached to the program already...
-		if next(program.kernels) ~= nil then
+		if next(program.kernels) == nil then
+print("tried to link program but source program "..tostring(program.libfile)..", has no kernels")
 			return returnError(ffi.C.CL_INVALID_OPERATION)
 		end
 		-- if the program wasn't called with clCompileProgram , or if that failed or something meh idk
 		if not program.buildCtx then
+print("tried to link program but source program has no buildCtx")
 			return returnError(ffi.C.CL_INVALID_OPERATION)
 		end
 		-- TODO what about if the program succeeded as a .lib?
@@ -2720,44 +2706,43 @@ cl.clGetKernelInfo = makeGetter{
 	},
 }
 
-function cl.clCreateKernel(programHandle, kernelName, errPtr)
+function cl.clCreateKernel(programHandle, kernelName, errcodeRet)
+--print('clCreateKernel', programHandle, kernelName, errcodeRet)
+	errcodeRet = ffi.cast('cl_int*', errcodeRet)
+	local function returnError(err, ret)
+		if errcodeRet ~= nil then errcodeRet[0] = err end
+		return ffi.cast('cl_kernel', ret)
+ 	end
+
 --print(debug.traceback())
 	--programHandle = ffi.cast('cl_program', programHandle)
 	kernelName = ffi.cast('char*', kernelName)
 	if kernelName == nil then
-		if errPtr ~= nil then errPtr[0] = ffi.C.CL_INVALID_VALUE end
-		return ffi.cast('cl_kernel', nil)
+		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 	kernelName = ffi.string(kernelName)
-	errPtr = ffi.cast('cl_int*', errPtr)
---print('clCreateKernel', programHandle, kernelName, errPtr)
 
 	local programHandle, err = programCastAndVerify(programHandle)
 	if err then
-		if errPtr ~= nil then errPtr[0] = err end
-		return ffi.cast('cl_kernel', nil)
+		return returnError(err)
 	end
 
 	local program = assert(programsForID[programHandle[0].id])
 	if program.status ~= ffi.C.CL_BUILD_SUCCESS then
 --print("program.status is not CL_BUILD_SUCCESS...")
-		if errPtr ~= nil then errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE end
-		return ffi.cast('cl_kernel', nil)
+		return returnError(ffi.C.CL_INVALID_PROGRAM_EXECUTABLE)
 	end
 	if program.lib == nil then
 --print("program.lib is nil")
-		if errPtr ~= nil then errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE end
-		return ffi.cast('cl_kernel', nil)
+		return returnError(ffi.C.CL_INVALID_PROGRAM_EXECUTABLE)
 	end
 
 	local kernel = program.kernels[kernelName]
 	if not kernel then
-		if errPtr ~= nil then errPtr[0] = ffi.C.CL_INVALID_KERNEL_NAME end
-		return ffi.cast('cl_kernel', nil)
+		return returnError(ffi.C.CL_INVALID_KERNEL_NAME)
 	end
 
-	if errPtr ~= nil then errPtr[0] = ffi.C.CL_SUCCESS end
-	return kernel.handle
+	return returnError(ffi.C.CL_SUCCESS, kernel.handle)
 end
 
 function cl.clSetKernelArg(kernelHandle, index, size, value)
