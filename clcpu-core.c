@@ -14,30 +14,9 @@
 // I can put the code shared by all programs in this one place
 // hmm and I need to linking against the clcpu global tmp lib
 
-typedef unsigned char uchar;
-typedef unsigned short ushort;
-typedef unsigned int uint;
-typedef unsigned long ulong;
-
 // private variables:
 
-typedef struct {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} clcpu_private_globalinfo_t;
-clcpu_private_globalinfo_t clcpu_private_globalinfo;
-
-typedef struct {
-	size_t global_linear_id;
-	size_t local_linear_id;
-	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} clcpu_private_threadinfo_t;
-clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+<?=clcpu_h?>
 
 // opencl api:
 

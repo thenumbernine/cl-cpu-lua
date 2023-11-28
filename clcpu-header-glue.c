@@ -10,19 +10,16 @@ if ffi.os == 'Windows' then
 #define __attribute__(x)
 
 //I hate Windows
-#define EXPORT __declspec(dllexport)
-#define kernel EXPORT
+#define kernel __declspec(dllexport)
 
 <?
 else
 	if cl.useCpp then
 ?>
-#define EXPORT
 #define kernel extern "C"
 <?
 	else
 ?>
-#define EXPORT
 #define kernel
 <?
 	end
@@ -72,10 +69,7 @@ void barrier(int);
 
 #include <math.h>
 
-typedef unsigned char uchar;
-typedef unsigned short ushort;
-typedef unsigned int uint;
-typedef unsigned long ulong;
+<?=clcpu_h?>
 
 //https://stackoverflow.com/questions/45108628/how-to-enable-fp16-type-on-gcc-for-x86-64
 // so maybe with clang?
@@ -151,31 +145,12 @@ typedef union {
 
 <? end -- cl.useCpp ?>
 
-typedef struct {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} clcpu_private_globalinfo_t;
-EXPORT extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
-
 uint get_work_dim();
 size_t get_global_size(int n);
 size_t get_local_size(int n);
 size_t get_enqueued_local_size(int n);
 size_t get_num_groups(int n);
 size_t get_global_offset(int n);
-
-// everything in the following need to know which core you're on:
-typedef struct {
-	size_t global_linear_id;
-	size_t local_linear_id;
-	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} clcpu_private_threadinfo_t;
-EXPORT clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
 
 size_t get_global_linear_id();
 size_t get_local_linear_id();

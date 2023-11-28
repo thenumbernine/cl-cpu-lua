@@ -6,36 +6,8 @@
 // but instead I'm just going to use std::async
 
 #include <stddef.h>			//size_t
-typedef unsigned int uint;
 
-//// TODO BEGIN CL_CPU.H
-
-typedef struct {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} clcpu_private_globalinfo_t;
-extern "C" {
-extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
-}
-
-//unlike the singlethread implementation, 
-// the multithread implementation needs a unique one of these per-thread.
-
-typedef struct {
-	size_t global_linear_id;
-	size_t local_linear_id;
-	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} clcpu_private_threadinfo_t;
-extern "C" {
-extern clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
-}
-
-//// TODO END CL_CPU.H
+<?=clcpu_h?>
 
 #include <vector>
 #include <numeric>	//iota

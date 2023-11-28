@@ -1808,23 +1808,16 @@ end
 cl.useCpp = false
 cl.extraInclude = table()
 local buildEnv
+local clcpu_h
 function cl:getBuildEnv()
 	if buildEnv then return buildEnv end
 
-	-- using ffi-c is convenient so long as the compile + link are done together ...
-	-- but if I want to separate them, I'll have so do this myself ...
-	-- [[
-	if self.useCpp then
-		-- c++ fails on field initialization
-		buildEnv = require 'ffi-c.cpp'
-	else
-		-- c fails on arith ops for vector types
-		buildEnv = require 'ffi-c.c'
-	end
-
 	-- don't clean up files upon gc
 	-- because this is deleting libraries that i'm trying to debug ...
-	function buildEnv:cleanup() end
+	require 'ffi-c.c'.cleanup = function() end
+	require 'ffi-c.cpp'.cleanup = function() end
+
+	clcpu_h = assert(cl.pathToCLCPU'cl-cpu.h':read())
 
 	-- while we're here, do this once ... and with C only
 	clcpuCoreLib = require 'ffi-c.c':build(template(
@@ -1834,6 +1827,11 @@ function cl:getBuildEnv()
 			ffi_all_types = ffi_all_types,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 			numcores = numcores,
+			clcpu_h = template(clcpu_h, {
+				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+				numcores = numcores,
+				extern = "",	-- declared here, so not extern
+			}),
 		}
 	))
 
@@ -1850,6 +1848,11 @@ function cl:getBuildEnv()
 				cl = cl,
 				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 				numcores = numcores,
+				clcpu_h = template(clcpu_h, {
+					clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+					numcores = numcores,
+					extern = 'extern "C"',	-- c++, so needs extern "C"
+				}),
 			}
 		))
 			
@@ -1920,6 +1923,17 @@ void clcpu_private_execMultiThread(
 	for _,f in ipairs(ffi_all_types) do
 		local k = tostring(ffi.typeof(f[1]))
 		ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
+	end
+
+	-- using ffi-c is convenient so long as the compile + link are done together ...
+	-- but if I want to separate them, I'll have so do this myself ...
+	-- [[
+	if self.useCpp then
+		-- c++ fails on field initialization
+		buildEnv = require 'ffi-c.cpp'
+	else
+		-- c fails on arith ops for vector types
+		buildEnv = require 'ffi-c.c'
 	end
 
 	return buildEnv
@@ -2170,6 +2184,9 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	programHandle[0].id = id
 --print('adding program entry', id)
 
+	-- this will initialize clcpu_h
+	cl:getBuildEnv()
+
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local srcpath = cl.pathToCLCPU'clcpu-header-glue.c'
 	local code = table{
@@ -2180,6 +2197,14 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 			numcores = numcores,
 			cl = cl,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+		
+			clcpu_h = template(clcpu_h, {
+				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+				numcores = numcores,
+				extern = ffi.os == 'Windows'
+					and '__declspec(dllexport) extern'
+					or 'extern',
+			}),
 		}),
 	}
 	for i=0,tonumber(numStrings)-1 do

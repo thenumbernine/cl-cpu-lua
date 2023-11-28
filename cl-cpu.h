@@ -2,8 +2,10 @@
 // that means I'll have to lua-template this to replace the <?=id?>'s with the program id
 // so can I gcc it into an obj and g++ this into an obj and link fine into a lib?
 
-#include <stddef.h>			//size_t
+typedef unsigned char uchar;
+typedef unsigned short ushort;
 typedef unsigned int uint;
+typedef unsigned long ulong;
 
 typedef struct {
 	uint work_dim;
@@ -12,7 +14,7 @@ typedef struct {
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } clcpu_private_globalinfo_t;
-extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
+<?=extern?> clcpu_private_globalinfo_t clcpu_private_globalinfo;
 
 //unlike the singlethread implementation, 
 // the multithread implementation needs a unique one of these per-thread.
@@ -24,4 +26,4 @@ typedef struct {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } clcpu_private_threadinfo_t;
-extern clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+<?=extern?> clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
