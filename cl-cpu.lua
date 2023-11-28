@@ -58,13 +58,6 @@ local ffi_all_types = table{
 	{'void*', 'pointer'},
 }
 
-local ffi_setter_for_ctype = {}
-for _,f in ipairs(ffi_all_types) do
-	local k = tostring(ffi.typeof(f[1]))
-	ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
-end
-
-
 local numcores = 1
 if cl.clcpu_kernelCallMethod == 'C-multithread' then
 	-- TODO get numcores from hardware_concurrency
@@ -1688,11 +1681,15 @@ end
 function cl.clRetainProgram(programHandle) end
 function cl.clReleaseProgram(programHandle) end
 
-local function getSymbols(soname)
-	local out = io.readproc(table{
+local function getSymbols(libfn)
+print('libfn', libfn)
+	local cmd = table{
 		'nm -D -f just-symbols',
-		path(program.libfile):escape(),
-	}:concat', ')
+		path(libfn):escape(),
+	}:concat' '
+print('>> '..cmd)
+	local out = io.readproc(cmd)
+print(out)
 	return string.split(string.trim(out), '\n')
 end
 
@@ -1760,28 +1757,30 @@ cl.clGetProgramInfo = makeGetter{
 	[ffi.C.CL_PROGRAM_NUM_KERNELS] = {
 		type = 'size_t',
 		get = function(programHandle)
-print(programHandle)
-print'getting program for handle'
+--print(programHandle)
+--print'getting program for handle'
 			local program = assert(programsForID[programHandle[0].id])
-print(program)
-print(program.libname)
+			assert(program.libname, "couldn't find a lib for this program")
+--print(program)
+--print(program.libname)
 			local symbols = getSymbols(program.libname)
-print(symbols)
-print(#symbols)
+--print(symbols)
+--print(#symbols)
 			return #symbols
 		end,
 	},
 	[ffi.C.CL_PROGRAM_KERNEL_NAMES] = {
 		type = 'char[]',
 		getString = function(programHandle)
-print(programHandle)
-print'getting program for handle'
+--print(programHandle)
+--print'getting program for handle'
 			local program = assert(programsForID[programHandle[0].id])
-print(program)
-print(program.libname)
+			assert(program.libname, "couldn't find a lib for this program")
+--print(program)
+--print(program.libname)
 			local symbols = getSymbols(program.libname)
-print(symbols)
-print(symbols:concat';')
+--print(symbols)
+--print(symbols:concat';')
 			return symbols:concat';'
 		end,
 	},
@@ -1973,7 +1972,7 @@ then
 typedef struct ffi_type;
 
 <? for _,f in ipairs(ffi_all_types) do ?>
-void ffi_set_<?=f[2]?>(ffi_type ** const);
+void ffi_<?=id?>_set_<?=f[2]?>(ffi_type ** const);
 <? end ?>
 
 typedef struct ffi_cif;
@@ -2679,7 +2678,7 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 
 		kernel.ffi_rtype = ffi.new('ffi_type*[1]')
 		local lib = program.lib
-		lib.ffi_set_void(kernel.ffi_rtype)	-- kernel always returns void
+		lib['ffi_'..program.id..'_set_void'](kernel.ffi_rtype)	-- kernel always returns void
 
 		kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
 		kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
@@ -2689,9 +2688,9 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 			if argInfo.isGlobal
 			or argInfo.isConstant
 			then
-				lib.ffi_set_pointer(ffi_atypes+i-1)
+				lib['ffi_'..program.id..'_set_pointer'](ffi_atypes+i-1)
 			elseif argInfo.isLocal then
-				lib.ffi_set_pointer(ffi_atypes+i-1)
+				lib['ffi_'..program.id..'_set_pointer'](ffi_atypes+i-1)
 			else
 				-- TODO how to detect the type of the arg?
 				-- all the CL API cares about is the sizeof
@@ -2701,6 +2700,13 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 				-- so I have to consult luajit's ffi for more info
 				-- TODO better way to do this?
 				local k = tostring(ffi.typeof(argInfo.type))
+
+				local ffi_setter_for_ctype = {}
+				for _,f in ipairs(ffi_all_types) do
+					local k = tostring(ffi.typeof(f[1]))
+					ffi_setter_for_ctype[k] = 'ffi_'..program.id..'_set_'..f[2]
+				end
+
 				local settername = ffi_setter_for_ctype[k]
 				if not settername then
 print("couldn't find setter for type "..k)
