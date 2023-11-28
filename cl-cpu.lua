@@ -1024,6 +1024,28 @@ cl.clGetContextInfo = makeGetter{
 	},
 }
 
+local function prepareArgsDevices(numDevices, devices)
+	numDevices = ffi.cast('cl_uint', numDevices)
+	numDevices = tonumber(numDevices)
+
+	devices = ffi.cast('cl_device_id*', devices)
+	if (devices == nil and numDevices > 0)
+	or (devices ~= nil and numDevices == 0)
+	then
+		return ffi.C.CL_INVALID_VALUE
+	end
+	-- make a local copy so program can hold onto it
+	local newDevices = ffi.new('cl_device_id[?]', numDevices)
+	for i=0,numDevices-1 do
+		local device, err = deviceCastAndVerify(devices[i])
+		if err then return err end
+		newDevices[i] = device
+	end
+	devices = newDevices
+
+	return cl.CL_SUCCESS, devices, numDevices
+end
+
 function cl.clCreateContext(properties, numDevices, devices, notify, userData, errPtr)
 	properties = ffi.cast('cl_context_properties*', properties)
 	numDevices = ffi.cast('cl_uint', numDevices)
@@ -2028,24 +2050,10 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 
 	-- [[ BEGIN matches clBuildProgram
 
-	numDevices = ffi.cast('cl_uint', numDevices)
-	numDevices = tonumber(numDevices)
-
-	devices = ffi.cast('cl_device_id*', devices)
-	if (devices == nil and numDevices > 0)
-	or (devices ~= nil and numDevices == 0)
-	then
-		return ffi.C.CL_INVALID_VALUE
-	end
-	-- make a local copy so program can hold onto it
-	local newDevices = ffi.new('cl_device_id[?]', numDevices)
-	for i=0,numDevices-1 do
-		local device, err = deviceCastAndVerify(devices[i])
-		if err then return err end
-		-- TODO if device is still building a program then return CL_INVALID_OPERATION
-		newDevices[i] = device
-	end
-	devices = newDevices
+	local err
+	err, numDevices, devices = prepareArgsDevices(numDevices, devices)
+	if err ~= ffi.C.CL_SUCCESS then return err end
+	-- TODO if device is still building a program then return CL_INVALID_OPERATION
 
 	options = ffi.cast('char*', options)
 	if options ~= nil then
@@ -2126,31 +2134,19 @@ end
 -- just obj -> exe
 --cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
 function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
+	local function returnError(err, program)
+		if errcodeRet ~= nil then errcodeRet[0] = err end
+		-- program can be nil or a cl_program.
+		-- for nil / null (default), cast and return
+		return ffi.cast('cl_program', program)
+ 	end
 
 	-- [[ BEGIN matches clBuildProgram
 
-	numDevices = ffi.cast('cl_uint', numDevices)
-	numDevices = tonumber(numDevices)
-
-	devices = ffi.cast('cl_device_id*', devices)
-	if (devices == nil and numDevices > 0)
-	or (devices ~= nil and numDevices == 0)
-	then
-		if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_VALUE end
-		return ffi.cast('cl_program', nil)
-	end
-	-- make a local copy so program can hold onto it
-	local newDevices = ffi.new('cl_device_id[?]', numDevices)
-	for i=0,numDevices-1 do
-		local device, err = deviceCastAndVerify(devices[i])
-		if err then
-			if errcodeRet then errcodeRet[0] = err end
-			return ffi.cast('cl_program', nil)
-		end
-		-- TODO if device is still building a program then return CL_INVALID_OPERATION
-		newDevices[i] = device
-	end
-	devices = newDevices
+	local err
+	err, numDevices, devices = prepareArgsDevices(numDevices, devices)
+	if err ~= ffi.C.CL_SUCCESS then return err end
+	-- TODO if device is still building a program then return CL_INVALID_OPERATION
 
 	options = ffi.cast('char*', options)
 	if options ~= nil then
@@ -2161,8 +2157,7 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
 
 	if notify == nil and userData ~= nil then
-		if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_VALUE end
-		return ffi.cast('cl_program', nil)
+		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 
 	-- ]] END matches clBuildProgram
@@ -2174,28 +2169,24 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	if (inputProgramHandles == nil and numInputPrograms > 0)
 	or (inputProgramHandles ~= nil and numInputPrograms == 0)
 	then
-		if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_VALUE end
-		return ffi.cast('cl_program', nil)
+		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 
 	local programs = table()
 	for i=0,numInputPrograms-1 do
 		local programHandle, err = programCastAndVerify(inputProgramHandles[i])
 		if err then
-			if errcodeRet then errcodeRet[0] = err end
-			return ffi.cast('cl_program', nil)
+			return returnError(err)
 		end
 		local id = programHandle[0].id
 		local program = programsForID[id]
 		-- if there are kernels attached to the program already...
 		if next(program.kernels) ~= nil then
-			if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_OPERATION end
-			return ffi.cast('cl_program', nil)
+			return returnError(ffi.C.CL_INVALID_OPERATION)
 		end
 		-- if the program wasn't called with clCompileProgram , or if that failed or something meh idk
 		if not program.buildCtx then
-			if errcodeRet then errcodeRet[0] = ffi.C.CL_INVALID_OPERATION end
-			return ffi.cast('cl_program', nil)
+			return returnError(ffi.C.CL_INVALID_OPERATION)
 		end
 		-- TODO what about if the program succeeded as a .lib?
 		programs:insert(program)
@@ -2237,8 +2228,7 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	end)
 
 error("need to make a new cl_program and return it...")
-	if errcodeRet then errcodeRet[0] = err end
-	return new_program_id
+	return returnError(err, newProgramID)
 end
 
 -- source -> obj, then obj -> exe
@@ -2247,24 +2237,10 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 
 	-- [[ BEGIN matches clBuildProgram
 
-	numDevices = ffi.cast('cl_uint', numDevices)
-	numDevices = tonumber(numDevices)
-
-	devices = ffi.cast('cl_device_id*', devices)
-	if (devices == nil and numDevices > 0)
-	or (devices ~= nil and numDevices == 0)
-	then
-		return ffi.C.CL_INVALID_VALUE
-	end
-	-- make a local copy so program can hold onto it
-	local newDevices = ffi.new('cl_device_id[?]', numDevices)
-	for i=0,numDevices-1 do
-		local device, err = deviceCastAndVerify(devices[i])
-		if err then return err end
-		-- TODO if device is still building a program then return CL_INVALID_OPERATION
-		newDevices[i] = device
-	end
-	devices = newDevices
+	local err
+	err, numDevices, devices = prepareArgsDevices(numDevices, devices)
+	if err ~= ffi.C.CL_SUCCESS then return err end
+	-- TODO if device is still building a program then return CL_INVALID_OPERATION
 
 	options = ffi.cast('char*', options)
 	if options ~= nil then
