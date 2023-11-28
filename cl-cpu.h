@@ -6,10 +6,13 @@
 typedef unsigned int uint;
 
 typedef struct {
+	uint work_dim;
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
-extern cl_globalinfo_t _program_<?=id?>_globalinfo;
+extern cl_globalinfo_t clcpu_private_globalinfo;
 
 //unlike the singlethread implementation, 
 // the multithread implementation needs a unique one of these per-thread.

@@ -29,6 +29,7 @@ else
 end
 ?>
 
+
 <? if not cl.useCpp then ?>
 
 // "constant" is the name of a variable used in bits/timex.h, so ... you can't do this ...
@@ -152,21 +153,20 @@ typedef union {
 <? end -- cl.useCpp ?>
 
 typedef struct {
+	uint work_dim;
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
-EXPORT cl_globalinfo_t _program_<?=id?>_globalinfo;
+EXPORT extern cl_globalinfo_t clcpu_private_globalinfo;
 
-extern size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
-extern size_t clcpu_private_local_size[<?=clDeviceMaxWorkItemDimension?>];
 uint get_work_dim();
 size_t get_global_size(int n);
 size_t get_local_size(int n);
 size_t get_enqueued_local_size(int n);
-
-#define get_num_groups(n)		_program_<?=id?>_globalinfo.num_groups[n]
-#define get_global_offset(n)	_program_<?=id?>_global_work_offset[n]
-
+size_t get_num_groups(int n);
+size_t get_global_offset(int n);
 
 // everything in the following need to know which core you're on:
 typedef struct {
@@ -235,7 +235,7 @@ void _program_<?=id?>_execSingleThread(
 	void (*func)(),
 	void ** values
 ) {
-	cl_globalinfo_t * globalinfo = &_program_<?=id?>_globalinfo;
+	cl_globalinfo_t * globalinfo = &clcpu_private_globalinfo;
 	cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo;
 
 	threadinfo->global_linear_id = 0;
@@ -248,13 +248,13 @@ void _program_<?=id?>_execSingleThread(
 		threadinfo->group_id[0] = 0,
 		threadinfo->global_id[0] = globalinfo->global_work_offset[0];
 
-		is[0] < clcpu_private_global_size[0];
+		is[0] < globalinfo->global_size[0];
 
 		++is[0],
 		++threadinfo->local_id[0],
 		++threadinfo->global_id[0]
 	) {
-		if (threadinfo->local_id[0] == clcpu_private_local_size[0]) {
+		if (threadinfo->local_id[0] == globalinfo->local_size[0]) {
 			threadinfo->local_id[0] = 0;
 			++threadinfo->group_id[0];
 		}
@@ -265,13 +265,13 @@ void _program_<?=id?>_execSingleThread(
 			threadinfo->group_id[1] = 0,
 			threadinfo->global_id[1] = globalinfo->global_work_offset[1];
 
-			is[1] < clcpu_private_global_size[1];
+			is[1] < globalinfo->global_size[1];
 
 			++is[1],
 			++threadinfo->local_id[1],
 			++threadinfo->global_id[1]
 		) {
-			if (threadinfo->local_id[1] == clcpu_private_local_size[1]) {
+			if (threadinfo->local_id[1] == globalinfo->local_size[1]) {
 				threadinfo->local_id[1] = 0;
 				++threadinfo->group_id[1];
 			}
@@ -282,21 +282,21 @@ void _program_<?=id?>_execSingleThread(
 				threadinfo->group_id[2] = 0,
 				threadinfo->global_id[2] = globalinfo->global_work_offset[2];
 
-				is[2] < clcpu_private_global_size[2];
+				is[2] < globalinfo->global_size[2];
 
 				++is[2],
 				++threadinfo->local_id[2],
 				++threadinfo->global_id[2],
 				++threadinfo->global_linear_id
 			) {
-				if (threadinfo->local_id[2] == clcpu_private_local_size[2]) {
+				if (threadinfo->local_id[2] == globalinfo->local_size[2]) {
 					threadinfo->local_id[2] = 0;
 					++threadinfo->group_id[2];
 				}
 
 				threadinfo->local_linear_id =
-					threadinfo->local_id[0] + clcpu_private_local_size[0] * (
-						threadinfo->local_id[1] + clcpu_private_local_size[1] * (
+					threadinfo->local_id[0] + globalinfo->local_size[0] * (
+						threadinfo->local_id[1] + globalinfo->local_size[1] * (
 							threadinfo->local_id[2]
 						)
 					)

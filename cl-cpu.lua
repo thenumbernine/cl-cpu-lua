@@ -1845,27 +1845,40 @@ typedef unsigned long ulong;
 
 // private variables:
 
-uint clcpu_private_work_dim = 0;
-size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
-size_t clcpu_private_local_size[<?=clDeviceMaxWorkItemDimension?>];
+typedef struct {
+	uint work_dim;
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
+	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
+} cl_globalinfo_t;
+cl_globalinfo_t clcpu_private_globalinfo;
 
 // opencl api:
 
 uint get_work_dim() {
-	return clcpu_private_work_dim;
+	return clcpu_private_globalinfo.work_dim;
 }
 
 size_t get_global_size(int n) {
-	return clcpu_private_global_size[n];
+	return clcpu_private_globalinfo.global_size[n];
 }
 
 size_t get_local_size(int n) {
-	return clcpu_private_local_size[n];
+	return clcpu_private_globalinfo.local_size[n];
 }
 
 //this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
 size_t get_enqueued_local_size(int n) {
-	return clcpu_private_local_size[n];
+	return clcpu_private_globalinfo.local_size[n];
+}
+
+size_t get_num_groups(int n) {
+	return clcpu_private_globalinfo.num_groups[n];
+}
+
+size_t get_global_offset(int n) {
+	return clcpu_private_globalinfo.global_work_offset[n];
 }
 ]], {
 		ffi_all_types = ffi_all_types,
@@ -1882,9 +1895,15 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 typedef unsigned long ulong;
 
-extern uint clcpu_private_work_dim;
-extern size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
-extern size_t clcpu_private_local_size[<?=clDeviceMaxWorkItemDimension?>];
+typedef struct {
+	uint work_dim;
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
+	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
+} cl_globalinfo_t;
+extern cl_globalinfo_t clcpu_private_globalinfo;
+
 ]], {
 		ffi_all_types = ffi_all_types,
 		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
@@ -2225,7 +2244,6 @@ local function setupCLProgramHeader(id)
 
 //everything accessible everywhere goes here
 typedef struct cl_globalinfo_t_<?=id?> {
-	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t_<?=id?>;
 cl_globalinfo_t_<?=id?> _program_<?=id?>_globalinfo;
@@ -3119,11 +3137,11 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		num_groups_v[i] = 1
 	end
 --print'assigning globals...'
-	local globalinfo = lib['_program_'..pid..'_globalinfo']
-	clcpuGlobalLib.lib.clcpu_private_work_dim = workDim
+	local globalinfo = lib.clcpu_private_globalinfo
+	globalinfo.work_dim = workDim
 	for n=0,clDeviceMaxWorkItemDimension-1 do
-		clcpuGlobalLib.lib.clcpu_private_global_size[n] = global_work_size_v[n+1]
-		clcpuGlobalLib.lib.clcpu_private_local_size[n] = local_work_size_v[n+1]
+		globalinfo.global_size[n] = global_work_size_v[n+1]
+		globalinfo.local_size[n] = local_work_size_v[n+1]
 		globalinfo.num_groups[n] = num_groups_v[n+1]
 		globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 	end
