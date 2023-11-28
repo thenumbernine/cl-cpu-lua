@@ -4,7 +4,7 @@ local execfn = arg[0]
 
 require 'cl-cpu.setup'
 local clcpu = require 'ffi.req' 'OpenCL'
-clcpu.pathToCLCPU = require 'ext.path'(execfn):getdir():abs().path
+clcpu.pathToCLCPU = require 'ext.path'(execfn):getdir():abs()
 
 local function run(...)
 	local x = ...

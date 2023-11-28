@@ -12,7 +12,7 @@ require 'ffi.req' 'c.stdlib'	-- rand()
 local cl = {}
 
 -- this is written in cl-cpu/run.lua immediately after loading cl-cpu/cl-cpu.lua
-cl.pathToCLCPU = '.'
+cl.pathToCLCPU = path'.'
 
 -- whether to verify each pointer passed into a function was an object we created
 local extraStrictVerification = true
@@ -898,7 +898,7 @@ cl.clGetDeviceInfo = makeGetter{
 	[ffi.C.CL_DEVICE_VERSION] = 'OpenCL 1.1',
 	[ffi.C.CL_DEVICE_EXTENSIONS] = table{
 		'cl_khr_fp64',
-		--'cl_khr_fp16', -- see the half comments in exec-single.c
+		--'cl_khr_fp16', -- see the half comments in clcpu-header-glue.c
 	}:concat' ',
 	[ffi.C.CL_DEVICE_PLATFORM] = {
 		type = 'cl_platform_id',
@@ -1826,74 +1826,14 @@ function cl:getBuildEnv()
 	function buildEnv:cleanup() end
 
 	-- while we're here, do this once ... and with C only
-	clcpuGlobalLib = require 'ffi-c.c':build(template([[
-#include <ffi.h>
-
-// TODO maybe put these in their own library or something?
-// they are only used for cl-cpu , so ... how about compiling them into their own .so?
-<? for _,f in ipairs(ffi_all_types) do
-?>void ffi_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
-<? end ?>
-
-// I can put the code shared by all programs in this one place
-// hmm and I need to linking against the clcpu global tmp lib
-
-typedef unsigned char uchar;
-typedef unsigned short ushort;
-typedef unsigned int uint;
-typedef unsigned long ulong;
-
-// private variables:
-
-typedef struct {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} clcpu_private_globalinfo_t;
-clcpu_private_globalinfo_t clcpu_private_globalinfo;
-
-typedef struct {
-	size_t global_linear_id;
-	size_t local_linear_id;
-	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} cl_threadinfo_t;
-cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
-
-// opencl api:
-
-uint get_work_dim() {
-	return clcpu_private_globalinfo.work_dim;
-}
-
-size_t get_global_size(int n) {
-	return clcpu_private_globalinfo.global_size[n];
-}
-
-size_t get_local_size(int n) {
-	return clcpu_private_globalinfo.local_size[n];
-}
-
-//this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
-size_t get_enqueued_local_size(int n) {
-	return clcpu_private_globalinfo.local_size[n];
-}
-
-size_t get_num_groups(int n) {
-	return clcpu_private_globalinfo.num_groups[n];
-}
-
-size_t get_global_offset(int n) {
-	return clcpu_private_globalinfo.global_work_offset[n];
-}
-]], {
-		ffi_all_types = ffi_all_types,
-		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-		numcores = numcores,
-	}))
+	clcpuGlobalLib = require 'ffi-c.c':build(template(
+		assert(cl.pathToCLCPU'clcpu-core.c':read()),
+		{
+			ffi_all_types = ffi_all_types,
+			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+			numcores = numcores,
+		}
+	))
 
 	ffi.cdef(template([[
 <? for _,f in ipairs(ffi_all_types) do ?>
@@ -2182,9 +2122,9 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 --print('adding program entry', id)
 
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
-	local srcfn = cl.pathToCLCPU..'/exec-single.c'
+	local srcpath = cl.pathToCLCPU'clcpu-header-glue.c'
 	local code = table{
-		template(assert(path(srcfn):read()), {
+		template(assert(srcpath:read()), {
 			id = id,
 			vectorTypes = vectorTypes,
 			kernelCallMethod = cl.clcpu_kernelCallMethod,
@@ -2682,12 +2622,12 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 				-- so for that i'd have to replace stuff anyways
 				-- so meh might as well just use templates
 
-				local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
+				local srcsrcpath = cl.pathToCLCPU'exec-multi.cpp'
 				local srcfile = name..'.cpp'
 				local objfile = name..buildCtx.env.objSuffix
 
 				-- generate the file from the templated file
-				assert(path(srcfile):write(template(assert(path(srcsrcfile):read()), {
+				assert(path(srcfile):write(template(assert(srcsrcpath:read()), {
 					id = buildCtx.currentProgramID,
 					numcores = numcores,
 					clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,

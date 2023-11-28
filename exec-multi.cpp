@@ -49,9 +49,16 @@ extern "C" void _program_<?=id?>_execSingleThread(
 	void ** values
 );
 
-static thread_local size_t clcpu_private_threadIndexForID = {};
-
 #include <iostream>
+
+// ok to convert the get_group_id get_global_id get_local_id etc to a single lib
+// I need currentthreadindex
+// but for that to move to my single lib
+// I need a cpp portion of it
+// and for that
+// I might as well move this file into it ...
+
+static thread_local size_t clcpu_private_threadIndexForID = {};
 
 extern "C" size_t _program_<?=id?>_currentthreadindex() {
 	return clcpu_private_threadIndexForID;
