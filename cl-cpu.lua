@@ -2066,6 +2066,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 	program.devices = nil
 	program.status = ffi.C.CL_BUILD_IN_PROGRESS
 	program.options = nil
+	program.kernel = {}
 
 	xpcall(function()
 		local buildCtx = {}
@@ -2079,7 +2080,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		-- :load - loads the .so file
 		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
 		local args = {
-			code = program.code,
+			code = assert(program.code, "couldn't find program.code"),
 			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
 		}
 		local buildEnv = cl:getBuildEnv()
@@ -2510,6 +2511,7 @@ local function removeCommentsAndApplyContinuations(code)
 	return code
 end
 
+-- run this on program when it has .code to build an initial map of kernels
 findProgramKernelsFromCode = function(program)
 	-- now that we've compiled it, search the code for kernels...
 
@@ -2594,6 +2596,32 @@ print("found kernel", kernelName, "with signature", sigargs)
 			ctx = program.ctx,
 		}
 
+		kernelsForID[kernelHandle[0].id] = kernel
+
+		-- TODO what if the kernel was already requested?
+		program.kernels[kernelName] = kernel
+	end
+end
+
+bindProgramKernels = function(program)
+	-- do this after link
+	for kernelName, kernel in pairs(program.kernels) do
+		-- only do this after library loading
+	--print("cdef'ing as sig:\n"..sig)
+		ffi.cdef(kernel.sig)
+
+		if not xpcall(function()
+			kernel.func = program.lib[kernelName]
+	--print('func', kernel.func)
+		end, function(err)
+			print('error while compiling: '..err)
+			print(debug.traceback())
+		end) then
+			-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
+			-- TODO how to report these errors?
+			error("here")
+		end
+
 		-- if we're using C+FFI then setup the CIF here
 		if cl.clcpu_kernelCallMethod == 'C-singlethread'
 		or cl.clcpu_kernelCallMethod == 'C-multithread'
@@ -2602,14 +2630,14 @@ print("found kernel", kernelName, "with signature", sigargs)
 			kernel.ffi_atypes = ffi_atypes
 
 			kernel.ffi_rtype = ffi.new('ffi_type*[1]')
-			local lib = program.lib
+			local lib = assert(program.lib, "couldn't find program.lib")
 			lib['ffi_'..program.id..'_set_void'](kernel.ffi_rtype)	-- kernel always returns void
 
 			kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
 			kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
 
 			for i=1,kernel.numargs do
-				local argInfo = assert(argInfos[i])
+				local argInfo = assert(kernel.argInfos[i])
 				if argInfo.isGlobal
 				or argInfo.isConstant
 				then
@@ -2647,38 +2675,7 @@ print("found kernel", kernelName, "with signature", sigargs)
 				-- TODO how to report this error
 				error("failed to prepare the FFI CIF")
 			end
-		end
 
-		kernelsForID[kernelHandle[0].id] = kernel
-
-		-- TODO what if the kernel was already requested?
-		program.kernels[kernelName] = kernel
-	end
-end
-
-bindProgramKernels = function(program)
-	-- do this after link
-	for kernelName, kernel in pairs(program.kernels) do
-		-- only do this after library loading
-	--print("cdef'ing as sig:\n"..sig)
-		ffi.cdef(kernel.sig)
-
-		if not xpcall(function()
-			kernel.func = program.lib[kernelName]
-	--print('func', kernel.func)
-		end, function(err)
-			print('error while compiling: '..err)
-			print(debug.traceback())
-		end) then
-			-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
-			-- TODO how to report these errors?
-			error("here")
-		end
-
-		-- if we're using C+FFI then setup the CIF here
-		if cl.clcpu_kernelCallMethod == 'C-singlethread'
-		or cl.clcpu_kernelCallMethod == 'C-multithread'
-		then
 			-- hmm, luajit can't pass C function pointers into C function pointer args of functions, so gotta make a closure even though I'm not wrapping a luajit function ...
 			kernel.func_closure = ffi.cast('void(*)()', kernel.func)
 		end
