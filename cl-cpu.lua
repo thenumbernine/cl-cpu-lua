@@ -2152,11 +2152,6 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 		end
 		local id = programHandle[0].id
 		local program = programsForID[id]
-		-- if there are kernels attached to the program already...
-		if next(program.kernels) == nil then
-print("tried to link program but source program "..tostring(program.libfile)..", has no kernels")
-			return returnError(ffi.C.CL_INVALID_OPERATION)
-		end
 		-- if the program wasn't called with clCompileProgram , or if that failed or something meh idk
 		if not program.buildCtx then
 print("tried to link program but source program has no buildCtx")
