@@ -1572,6 +1572,230 @@ function cl.clEnqueueCopyBuffer(
 end
 
 
+-- KERNEL helper
+
+local clKernelWorkGroupSize = 1
+
+local cl_kernel_verify = ffi.C.rand()
+
+local kernelsForID = table()
+
+local ffi_setter_for_ctype = {}
+
+local function kernelCastAndVerify(kernelHandle)
+	kernelHandle = ffi.cast('struct _cl_kernel*', kernelHandle)
+	if kernelHandle == nil
+	or kernelHandle[0].verify ~= cl_kernel_verify
+	or not kernelsForID[kernelHandle[0].id]
+	or kernelHandle ~= ffi.cast('cl_kernel', kernelsForID[kernelHandle[0].id].handle)
+	then
+		return nil, ffi.C.CL_INVALID_KERNEL
+	end
+	return kernelHandle
+end
+
+-- from my lua-preproc project ...
+local function removeCommentsAndApplyContinuations(code)
+
+	-- should line continuations \ affect single-line comments?
+	-- if so then do this here
+	-- or should they not?  then do this after.
+	repeat
+		local i, j = code:find('\\\n')
+		if not i then break end
+		code = code:sub(1,i-1)..' '..code:sub(j+1)
+	until false
+
+	-- remove all /* */ blocks first
+	repeat
+		local i = code:find('/*',1,true)
+		if not i then break end
+		local j = code:find('*/',i+2,true)
+		if not j then
+			error("found /* with no */")
+		end
+		code = code:sub(1,i-1)..code:sub(j+2)
+	until false
+
+	-- [[ remove all // \n blocks first
+	repeat
+		local i = code:find('//',1,true)
+		if not i then break end
+		local j = code:find('\n',i+2,true) or #code
+		code = code:sub(1,i-1)..code:sub(j)
+	until false
+	--]]
+
+	return code
+end
+
+-- run this on program when it has .code to build an initial map of kernels
+local function findProgramKernelsFromCode(program)
+	-- now that we've compiled it, search the code for kernels...
+
+	local code = removeCommentsAndApplyContinuations(assert(program.code, "expected to find program.code"))
+
+	-- try to find all kernels in the code ...
+	for kernelName, sigargs in code:gmatch('kernel%s+void%s+([a-zA-Z_][a-zA-Z0-9_]*)%s*%(([^)]*)%)') do
+--print("found kernel", kernelName, "with signature", sigargs)
+
+		-- split by comma and parse each arg separately
+		-- let's hope there's no macros in there with commas in them
+		local argInfos = table()
+		sigargs = string.split(sigargs, ','):mapi(function(arg,i)
+			local argInfo = {}
+			argInfos[i] = argInfo
+
+			arg = string.trim(arg)
+			local tokens = string.split(arg, '%s+')
+			-- split off any *'s into unique tokens
+			-- TODO not just at the end of the word.  that's just my coding style, right?
+			-- TODO how about []'s?
+			for j=#tokens,1,-1 do
+				while tokens[j]:sub(-1) == '*' do
+					table.insert(tokens, j+1, '*')
+					tokens[j] = tokens[j]:sub(1,-2)
+				end
+
+				if tokens[j] == 'global' then
+					table.remove(tokens, j)
+					argInfo.isGlobal = true
+				elseif tokens[j] == 'local' then
+					table.remove(tokens, j)
+					argInfo.isLocal = true
+				elseif tokens[j] == 'constant' then
+					table.remove(tokens, j)
+					argInfo.isConstant = true
+				end
+			end
+
+			local varname = tokens:remove()	-- assume the last is the variable name
+			argInfo.name = varname
+
+			-- keep track of the type to convert to before calling the kernel
+			argInfo.origtype = tokens:concat' '
+			-- or not? idk that i need it -- I'll let the kernel code do the casting
+
+			-- remove consts
+			tokens = tokens:filter(function(t) return t ~= 'const' end)
+
+			-- ok now when deducing the link signature, there will be lots of struct ptrs - just convert them to void*
+			-- so if the 2nd-to-last is a * then replace all type tokens with 'void*'
+			if tokens:find'*' then
+				tokens = table{'void', '*'}
+			end
+
+			-- treat all ptr args as void*'s
+			argInfo.type = tokens:concat' '
+
+			tokens:insert(varname)
+
+			return tokens:concat' '
+		end)
+		local numargs = #sigargs
+		assert(#argInfos == numargs)
+
+		sigargs = sigargs:concat', '
+
+		local sig = 'void '..kernelName.. '(' .. sigargs .. ');'
+
+		local kernelHandle = ffi.new'struct _cl_kernel[1]'
+		kernelHandle[0].verify = cl_kernel_verify
+		kernelHandle[0].id = #kernelsForID+1
+		local kernel = {
+			name = kernelName,
+			program = program,
+			sig = sig,					-- use this for ffi.cdef after link
+			--func = func,				-- assign this later, after link
+			argInfos = argInfos,		-- holds for each arg: name, type, isGlobal, isLocal, isConstant
+			args = {},					-- holds the clSetKernelArg() values
+			numargs = numargs,
+			handle = kernelHandle,		-- hold so luajit doesn't free
+			ctx = program.ctx,
+		}
+		kernelsForID[kernelHandle[0].id] = kernel
+
+		-- TODO what if the kernel was already requested?
+		program.kernels[kernelName] = kernel
+	end
+end
+
+local function bindProgramKernels(program)
+	-- do this after link
+	for kernelName, kernel in pairs(program.kernels) do
+		-- only do this after library loading
+	--print("cdef'ing as sig:\n"..sig)
+		ffi.cdef(kernel.sig)
+
+		if not xpcall(function()
+			kernel.func = program.lib[kernelName]
+	--print('func', kernel.func)
+		end, function(err)
+			print('error while compiling: '..err)
+			print(debug.traceback())
+		end) then
+			-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
+			-- TODO how to report these errors?
+			error("here")
+		end
+
+		-- if we're using C+FFI then setup the CIF here
+		if cl.clcpu_kernelCallMethod == 'C-singlethread'
+		or cl.clcpu_kernelCallMethod == 'C-multithread'
+		then
+			local ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
+			kernel.ffi_atypes = ffi_atypes
+
+			kernel.ffi_rtype = ffi.new('ffi_type*[1]')
+			local lib = assert(program.lib, "couldn't find program.lib")
+			lib['ffi_set_void'](kernel.ffi_rtype)	-- kernel always returns void
+
+			kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
+			kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
+
+			for i=1,kernel.numargs do
+				local argInfo = assert(kernel.argInfos[i])
+				if argInfo.isGlobal
+				or argInfo.isConstant
+				then
+					lib['ffi_set_pointer'](ffi_atypes+i-1)
+				elseif argInfo.isLocal then
+					lib['ffi_set_pointer'](ffi_atypes+i-1)
+				else
+					-- TODO how to detect the type of the arg?
+					-- all the CL API cares about is the sizeof
+					-- FFI wants to know more details than that
+					-- but all I have from the CL code is the CL/C typename
+					-- which could be typedef'd
+					-- so I have to consult luajit's ffi for more info
+					-- TODO better way to do this?
+					local k = tostring(ffi.typeof(argInfo.type))
+
+					local settername = ffi_setter_for_ctype[k]
+					if not settername then
+						-- TODO how to report this error
+						error("couldn't find setter for type "..k)
+					else
+						lib[settername](ffi_atypes+i-1)
+					end
+				end
+			end
+
+			kernel.ffi_cif = ffi.new('ffi_cif[1]')
+			if ffi.C.ffi_prep_cif(kernel.ffi_cif, ffi.C.FFI_DEFAULT_ABI, kernel.numargs, kernel.ffi_rtype[0], ffi_atypes) ~= ffi.C.FFI_OK then
+				-- TODO how to report this error
+				error("failed to prepare the FFI CIF")
+			end
+
+			-- hmm, luajit can't pass C function pointers into C function pointer args of functions, so gotta make a closure even though I'm not wrapping a luajit function ...
+			kernel.func_closure = ffi.cast('void(*)()', kernel.func)
+		end
+	end
+end
+
+
+
+
 -- PROGRAM
 
 -- hack for forcing cpp format which is found in cl-cpu/run.lua:
@@ -1579,7 +1803,6 @@ cl.useCpp = false
 cl.extraInclude = table()
 local buildEnv
 local ffiSetterLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
-local ffi_setter_for_ctype = {}
 function cl:getBuildEnv()
 	if buildEnv then return buildEnv end
 
@@ -1940,10 +2163,6 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	return returnError(ffi.C.CL_SUCCESS, programHandle)
 end
 
--- defined later in the kernel section
-local findProgramKernelsFromCode
-local bindProgramKernels
-
 
 function cl.clCreateProgramWithBinary(ctx, numDevices, devices, lengths, binaries, binaryStatus, errcodeRets)
 	-- TODO an easy implementation would be to just return a string for the binary
@@ -2176,7 +2395,7 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 		local program = programsForID[id]
 		-- if the program wasn't called with clCompileProgram , or if that failed or something meh idk
 		if not program.buildCtx then
-print("tried to link program but source program has no buildCtx")
+print("tried to link program but source program "..tostring(program.srcfile).." has no buildCtx")
 			return returnError(ffi.C.CL_INVALID_OPERATION)
 		end
 		-- TODO what about if the program succeeded as a .lib?
@@ -2214,68 +2433,67 @@ print("tried to link program but source program has no buildCtx")
 	local headerCode
 	xpcall(function()
 		local buildEnv = cl:getBuildEnv()
-		--[[
-		if #programs == 1 then
-			-- just finish the buildctx process
-			local program = programs[1]
-			local args = program.buildArgs
-			local buildCtx = program.buildCtx
-			-- TODO what about state info in here?
-			-- this is why I think I need to break apart everything...
-			buildEnv:link(args, buildCtx)
-			if buildCtx.error then error(buildCtx.error) end
-			buildEnv:load(args, buildCtx)
-			if buildCtx.error then error(buildCtx.error) end
-
-			setupCLProgramHeader(program.id)
-		else
-		--]] do
-			local buildCtx = {}
-			local args = {}
-			buildEnv:setup(args, buildCtx)
-			if buildCtx.error then error(buildCtx.error) end
-			-- ... don't compile ...
-			function buildEnv:addExtraObjFiles(objfiles)
-				for i=#objfiles,1,-1 do objfiles[i] = nil end
-				objfiles:insert((assert(ffiSetterLib.objfile)))
-				objfiles:append(programs:mapi(function(program)
-					return (assert(program.buildCtx.objfile))
-				end))
-			end
-			buildEnv:link(args, buildCtx)
-			if buildCtx.error then error(buildCtx.error) end
-			buildEnv:load(args, buildCtx)
-			if buildCtx.error then error(buildCtx.error) end
-
-			-- TODO here, how to build from other builds ...
-			-- by skipping the code / :compile part, and by overriding the :addExtraObjFiles part
-
-			setupCLProgramHeader(id)
-			local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
-
-			local kernels = {}
-			-- is this safe?
-			-- will there be collisions? I suppose not if there have already been compiler link collisions.
-			-- will something get written later?  hmm...
-			for _,program in ipairs(programs) do
-				for k,v in pairs(program.kernels) do
-					kernels[k] = v
-				end
-			end
-
-			program.lib = buildCtx.lib
-			program.libfile = buildCtx.libfile
-			program.libdata = libdata
-			program.compileLog = buildCtx.compileLog
-			program.linkLog = buildCtx.linkLog
-			program.numDevices = numDevices
-			program.devices = devices
-			program.status = ffi.C.CL_BUILD_SUCCESS
-			program.options = options
-			program.kernels = kernels
-
-			bindProgramKernels(program)
+		local buildCtx = {}
+		local args = {}
+		buildEnv:setup(args, buildCtx)
+		if buildCtx.error then error(buildCtx.error) end
+		-- ... don't compile ...
+		function buildEnv:addExtraObjFiles(objfiles)
+			for i=#objfiles,1,-1 do objfiles[i] = nil end
+			objfiles:insert((assert(ffiSetterLib.objfile)))
+			objfiles:append(programs:mapi(function(srcProgram)
+				return (assert(srcProgram.buildCtx.objfile))
+			end))
 		end
+		buildEnv:link(args, buildCtx)
+		if buildCtx.error then error(buildCtx.error) end
+		buildEnv:load(args, buildCtx)
+		if buildCtx.error then error(buildCtx.error) end
+
+		-- TODO here, how to build from other builds ...
+		-- by skipping the code / :compile part, and by overriding the :addExtraObjFiles part
+
+		setupCLProgramHeader(id)
+		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
+
+		local kernels = {}
+		-- is this safe?
+		-- will there be collisions? I suppose not if there have already been compiler link collisions.
+		-- will something get written later?  hmm...
+		-- now I have to copy the kernels and give them unique programs ...
+		for _,srcProgram in ipairs(programs) do
+			for kernelName,srcKernel in pairs(srcProgram.kernels) do
+				local kernelHandle = ffi.new'struct _cl_kernel[1]'
+				kernelHandle[0].verify = cl_kernel_verify
+				kernelHandle[0].id = #kernelsForID+1
+				local kernel = {
+					name = kernelName,
+					program = program,	-- use the new program
+					sig = srcKernel.sig,
+					func = srcKernel.func,	-- is this assigned yet?  I think not until bindProgramKernels ...
+					argInfos = table(srcKernel.argInfos),	-- read-only?  deep copy? idk?
+					args = {},	-- srcKernel.args,	-- holds clSetKernelArg() stuff, so might as well empty it ...
+					numargs = srcKernel.numargs,
+					handle = kernelHandle,	-- handle has to be new
+					ctx = program.ctx,
+				}
+				kernelsForID[kernelHandle[0].id] = kernel
+				kernels[kernelName] = kernel
+			end
+		end
+
+		program.lib = assert(buildCtx.lib, "looks like we didn't get the lib...")
+		program.libfile = buildCtx.libfile
+		program.libdata = libdata
+		program.compileLog = buildCtx.compileLog
+		program.linkLog = buildCtx.linkLog
+		program.numDevices = numDevices
+		program.devices = devices
+		program.status = ffi.C.CL_BUILD_SUCCESS
+		program.options = options
+		program.kernels = kernels
+
+		bindProgramKernels(program)
 	end, function(err)
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
@@ -2433,7 +2651,8 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
 
-		program.lib = buildCtx.lib
+print("clBuildProgram GOT LIB FOR PROGRAM "..buildCtx.srcfile)
+		program.lib = assert(buildCtx.lib)
 		program.libfile = buildCtx.libfile
 		program.libdata = libdata
 		program.compileLog = buildCtx.compileLog
@@ -2462,224 +2681,6 @@ end
 
 
 -- KERNEL
-
-local clKernelWorkGroupSize = 1
-
-local cl_kernel_verify = ffi.C.rand()
-
-local kernelsForID = table()
-
-local function kernelCastAndVerify(kernelHandle)
-	kernelHandle = ffi.cast('struct _cl_kernel*', kernelHandle)
-	if kernelHandle == nil
-	or kernelHandle[0].verify ~= cl_kernel_verify
-	or not kernelsForID[kernelHandle[0].id]
-	or kernelHandle ~= ffi.cast('cl_kernel', kernelsForID[kernelHandle[0].id].handle)
-	then
-		return nil, ffi.C.CL_INVALID_KERNEL
-	end
-	return kernelHandle
-end
-
--- from my lua-preproc project ...
-local function removeCommentsAndApplyContinuations(code)
-
-	-- should line continuations \ affect single-line comments?
-	-- if so then do this here
-	-- or should they not?  then do this after.
-	repeat
-		local i, j = code:find('\\\n')
-		if not i then break end
-		code = code:sub(1,i-1)..' '..code:sub(j+1)
-	until false
-
-	-- remove all /* */ blocks first
-	repeat
-		local i = code:find('/*',1,true)
-		if not i then break end
-		local j = code:find('*/',i+2,true)
-		if not j then
-			error("found /* with no */")
-		end
-		code = code:sub(1,i-1)..code:sub(j+2)
-	until false
-
-	-- [[ remove all // \n blocks first
-	repeat
-		local i = code:find('//',1,true)
-		if not i then break end
-		local j = code:find('\n',i+2,true) or #code
-		code = code:sub(1,i-1)..code:sub(j)
-	until false
-	--]]
-
-	return code
-end
-
--- run this on program when it has .code to build an initial map of kernels
-findProgramKernelsFromCode = function(program)
-	-- now that we've compiled it, search the code for kernels...
-
-	local code = removeCommentsAndApplyContinuations(assert(program.code, "expected to find program.code"))
-
-	-- try to find all kernels in the code ...
-	for kernelName, sigargs in code:gmatch('kernel%s+void%s+([a-zA-Z_][a-zA-Z0-9_]*)%s*%(([^)]*)%)') do
---print("found kernel", kernelName, "with signature", sigargs)
-
-		-- split by comma and parse each arg separately
-		-- let's hope there's no macros in there with commas in them
-		local argInfos = table()
-		sigargs = string.split(sigargs, ','):mapi(function(arg,i)
-			local argInfo = {}
-			argInfos[i] = argInfo
-
-			arg = string.trim(arg)
-			local tokens = string.split(arg, '%s+')
-			-- split off any *'s into unique tokens
-			-- TODO not just at the end of the word.  that's just my coding style, right?
-			-- TODO how about []'s?
-			for j=#tokens,1,-1 do
-				while tokens[j]:sub(-1) == '*' do
-					table.insert(tokens, j+1, '*')
-					tokens[j] = tokens[j]:sub(1,-2)
-				end
-
-				if tokens[j] == 'global' then
-					table.remove(tokens, j)
-					argInfo.isGlobal = true
-				elseif tokens[j] == 'local' then
-					table.remove(tokens, j)
-					argInfo.isLocal = true
-				elseif tokens[j] == 'constant' then
-					table.remove(tokens, j)
-					argInfo.isConstant = true
-				end
-			end
-
-			local varname = tokens:remove()	-- assume the last is the variable name
-			argInfo.name = varname
-
-			-- keep track of the type to convert to before calling the kernel
-			argInfo.origtype = tokens:concat' '
-			-- or not? idk that i need it -- I'll let the kernel code do the casting
-
-			-- remove consts
-			tokens = tokens:filter(function(t) return t ~= 'const' end)
-
-			-- ok now when deducing the link signature, there will be lots of struct ptrs - just convert them to void*
-			-- so if the 2nd-to-last is a * then replace all type tokens with 'void*'
-			if tokens:find'*' then
-				tokens = table{'void', '*'}
-			end
-
-			-- treat all ptr args as void*'s
-			argInfo.type = tokens:concat' '
-
-			tokens:insert(varname)
-
-			return tokens:concat' '
-		end)
-		local numargs = #sigargs
-		assert(#argInfos == numargs)
-
-		sigargs = sigargs:concat', '
-
-		local sig = 'void '..kernelName.. '(' .. sigargs .. ');'
-
-		local kernelHandle = ffi.new'struct _cl_kernel[1]'
-		kernelHandle[0].verify = cl_kernel_verify
-		kernelHandle[0].id = #kernelsForID+1
-		local kernel = {
-			name = kernelName,
-			program = program,
-			sig = sig,					-- use this for ffi.cdef after link
-			--func = func,				-- assign this later, after link
-			argInfos = argInfos,		-- holds for each arg: name, type, isGlobal, isLocal, isConstant
-			args = {},					-- holds the clSetKernelArg() values
-			numargs = numargs,
-			handle = kernelHandle,		-- hold so luajit doesn't free
-			ctx = program.ctx,
-		}
-
-		kernelsForID[kernelHandle[0].id] = kernel
-
-		-- TODO what if the kernel was already requested?
-		program.kernels[kernelName] = kernel
-	end
-end
-
-bindProgramKernels = function(program)
-	-- do this after link
-	for kernelName, kernel in pairs(program.kernels) do
-		-- only do this after library loading
-	--print("cdef'ing as sig:\n"..sig)
-		ffi.cdef(kernel.sig)
-
-		if not xpcall(function()
-			kernel.func = program.lib[kernelName]
-	--print('func', kernel.func)
-		end, function(err)
-			print('error while compiling: '..err)
-			print(debug.traceback())
-		end) then
-			-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
-			-- TODO how to report these errors?
-			error("here")
-		end
-
-		-- if we're using C+FFI then setup the CIF here
-		if cl.clcpu_kernelCallMethod == 'C-singlethread'
-		or cl.clcpu_kernelCallMethod == 'C-multithread'
-		then
-			local ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
-			kernel.ffi_atypes = ffi_atypes
-
-			kernel.ffi_rtype = ffi.new('ffi_type*[1]')
-			local lib = assert(program.lib, "couldn't find program.lib")
-			lib['ffi_set_void'](kernel.ffi_rtype)	-- kernel always returns void
-
-			kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
-			kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
-
-			for i=1,kernel.numargs do
-				local argInfo = assert(kernel.argInfos[i])
-				if argInfo.isGlobal
-				or argInfo.isConstant
-				then
-					lib['ffi_set_pointer'](ffi_atypes+i-1)
-				elseif argInfo.isLocal then
-					lib['ffi_set_pointer'](ffi_atypes+i-1)
-				else
-					-- TODO how to detect the type of the arg?
-					-- all the CL API cares about is the sizeof
-					-- FFI wants to know more details than that
-					-- but all I have from the CL code is the CL/C typename
-					-- which could be typedef'd
-					-- so I have to consult luajit's ffi for more info
-					-- TODO better way to do this?
-					local k = tostring(ffi.typeof(argInfo.type))
-
-					local settername = ffi_setter_for_ctype[k]
-					if not settername then
-						-- TODO how to report this error
-						error("couldn't find setter for type "..k)
-					else
-						lib[settername](ffi_atypes+i-1)
-					end
-				end
-			end
-
-			kernel.ffi_cif = ffi.new('ffi_cif[1]')
-			if ffi.C.ffi_prep_cif(kernel.ffi_cif, ffi.C.FFI_DEFAULT_ABI, kernel.numargs, kernel.ffi_rtype[0], ffi_atypes) ~= ffi.C.FFI_OK then
-				-- TODO how to report this error
-				error("failed to prepare the FFI CIF")
-			end
-
-			-- hmm, luajit can't pass C function pointers into C function pointer args of functions, so gotta make a closure even though I'm not wrapping a luajit function ...
-			kernel.func_closure = ffi.cast('void(*)()', kernel.func)
-		end
-	end
-end
 
 
 function cl.clRetainKernel(kernel) end
@@ -2752,6 +2753,7 @@ print("program.lib is nil")
 	if not kernel then
 		return returnError(ffi.C.CL_INVALID_KERNEL_NAME)
 	end
+	assert(kernel.program == program, "how did a program end up with another programs kernel?")
 
 	return returnError(ffi.C.CL_SUCCESS, kernel.handle)
 end
@@ -2922,6 +2924,10 @@ end
 
 	local pid = program.id
 	local lib = program.lib
+	if not lib then
+print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile).." which didn't have an associated lib.")
+		return ffi.C.CL_INVALID_PROGRAM_EXECUTABLE
+	end
 	local srcargs = kernel.args
 	local argInfos = kernel.argInfos
 
@@ -2933,6 +2939,7 @@ end
 			local argInfo = assert(argInfos[i])
 			local srcarg = srcargs[i]
 			if srcarg == nil then		-- arg was not specified
+--print("Lua call branch: arg was not specified ...")
 				return ffi.C.CL_INVALID_KERNEL_ARGS
 			end
 			local arg = srcarg.ptr
@@ -2997,6 +3004,7 @@ end
 			--print('ARGINFOTYPE', argInfo.type, argInfo.isGlobal, argInfo.isConstant, argInfo.isLocal)
 			local srcarg = srcargs[i]
 			if srcarg == nil then		-- arg was not specified
+--print("C call branch: arg was not specified ...")
 				return ffi.C.CL_INVALID_KERNEL_ARGS
 			end
 			local arg = srcarg.ptr
