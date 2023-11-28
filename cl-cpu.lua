@@ -27,6 +27,10 @@ if cl.clcpu_kernelCallMethod == 'C-singlethread'
 or cl.clcpu_kernelCallMethod == 'C-multithread'
 then
 	require 'ffi.req' 'libffi'	-- this is lib-ffi, not luajit-ffi
+else
+	ffi.cdef[[
+typedef void ffi_type;
+]]
 end
 
 local ffi_all_types = table{
@@ -1835,23 +1839,12 @@ function cl:getBuildEnv()
 		ffi_all_types = ffi_all_types,
 	}))
 
-	-- hmm why does the Lua pathway have a proble with `typedef struct ffi_type;` ?
-	ffi.cdef(template([[<?
-if cl.clcpu_kernelCallMethod ~= 'Lua' then
-?>typedef struct ffi_type;
-<?
-end
-for _,f in ipairs(ffi_all_types) do
-	if cl.clcpu_kernelCallMethod ~= 'Lua' then
-?>void ffi_set_<?=f[2]?>(ffi_type ** const);
-<?	else
-?>void ffi_set_<?=f[2]?>(void ** const);
-<?	end
-end
-?>
+	ffi.cdef(template([[
+<? for _,f in ipairs(ffi_all_types) do ?>
+void ffi_set_<?=f[2]?>(ffi_type ** const);
+<? end ?>
 ]], {
 		ffi_all_types = ffi_all_types,
-		cl = cl,
 	}))
 
 	for _,f in ipairs(ffi_all_types) do
