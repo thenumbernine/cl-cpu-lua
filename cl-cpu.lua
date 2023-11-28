@@ -1926,6 +1926,11 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	return ffi.cast('cl_program', programHandle)
 end
 
+-- defined later in the kernel section
+local findProgramKernelsFromCode
+local bindProgramKernels
+
+
 function cl.clCreateProgramWithBinary(ctx, numDevices, devices, lengths, binaries, binaryStatus, errcodeRets)
 	-- TODO an easy implementation would be to just return a string for the binary
 	-- but it gets more difficult if you want to support programs as binary-obj, binary-lib, binary-exe ... then you should also keep track of which one the clprogram is ...
@@ -2087,6 +2092,8 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		-- save for later for when clLinkProgram is called
 		program.buildArgs = args
 		program.buildCtx = buildCtx
+
+		findProgramKernelsFromCode(program)
 	end, function(err)
 		-- this is still in the temp file so ...
 		--io.stderr:write('code:', '\n')
@@ -2261,6 +2268,8 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 			program.status = ffi.C.CL_BUILD_SUCCESS
 			program.options = options
 			program.kernels = kernels
+
+			bindProgramKernels(program)
 		end
 	end, function(err)
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
@@ -2272,9 +2281,6 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 
 	return returnError(err, programHandle)
 end
-
--- defined later in the kernel section
-local findProgramKernels
 
 -- source -> obj, then obj -> exe
 function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, userData)
@@ -2432,7 +2438,8 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		program.options = options
 
 		-- also now that we've built, we can extract kernels
-		findProgramKernels(program)
+		findProgramKernelsFromCode(program)
+		bindProgramKernels(program)
 
 	end, function(err)
 		-- this is still in the temp file so ...
@@ -2503,14 +2510,14 @@ local function removeCommentsAndApplyContinuations(code)
 	return code
 end
 
-findProgramKernels = function(program)
+findProgramKernelsFromCode = function(program)
 	-- now that we've compiled it, search the code for kernels...
 
 	local code = removeCommentsAndApplyContinuations(assert(program.code, "expected to find program.code"))
 
 	-- try to find all kernels in the code ...
 	for kernelName, sigargs in code:gmatch('kernel%s+void%s+([a-zA-Z_][a-zA-Z0-9_]*)%s*%(([^)]*)%)') do
---print('found with signature:', kernelName, sigargs)
+print("found kernel", kernelName, "with signature", sigargs)
 
 		-- split by comma and parse each arg separately
 		-- let's hope there's no macros in there with commas in them
@@ -2572,29 +2579,14 @@ findProgramKernels = function(program)
 
 		local sig = 'void '..kernelName.. '(' .. sigargs .. ');'
 
-	--print("cdef'ing as sig:\n"..sig)
-		ffi.cdef(sig)
-
-		local func
-		if not xpcall(function()
-			func = program.lib[kernelName]
-	--print('func', func)
-		end, function(err)
-			print('error while compiling: '..err)
-			print(debug.traceback())
-		end) then
-			-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
-			-- TODO how to report these errors?
-			error("here")
-		end
-
 		local kernelHandle = ffi.new'struct _cl_kernel[1]'
 		kernelHandle[0].verify = cl_kernel_verify
 		kernelHandle[0].id = #kernelsForID+1
 		local kernel = {
 			name = kernelName,
 			program = program,
-			func = func,
+			sig = sig,					-- use this for ffi.cdef after link
+			--func = func,				-- assign this later, after link
 			argInfos = argInfos,		-- holds for each arg: name, type, isGlobal, isLocal, isConstant
 			args = {},					-- holds the clSetKernelArg() values
 			numargs = numargs,
@@ -2655,9 +2647,6 @@ findProgramKernels = function(program)
 				-- TODO how to report this error
 				error("failed to prepare the FFI CIF")
 			end
-
-			-- hmm, luajit can't pass C function pointers into C function pointer args of functions, so gotta make a closure even though I'm not wrapping a luajit function ...
-			kernel.func_closure = ffi.cast('void(*)()', kernel.func)
 		end
 
 		kernelsForID[kernelHandle[0].id] = kernel
@@ -2667,6 +2656,34 @@ findProgramKernels = function(program)
 	end
 end
 
+bindProgramKernels = function(program)
+	-- do this after link
+	for kernelName, kernel in pairs(program.kernels) do
+		-- only do this after library loading
+	--print("cdef'ing as sig:\n"..sig)
+		ffi.cdef(kernel.sig)
+
+		if not xpcall(function()
+			kernel.func = program.lib[kernelName]
+	--print('func', kernel.func)
+		end, function(err)
+			print('error while compiling: '..err)
+			print(debug.traceback())
+		end) then
+			-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
+			-- TODO how to report these errors?
+			error("here")
+		end
+
+		-- if we're using C+FFI then setup the CIF here
+		if cl.clcpu_kernelCallMethod == 'C-singlethread'
+		or cl.clcpu_kernelCallMethod == 'C-multithread'
+		then
+			-- hmm, luajit can't pass C function pointers into C function pointer args of functions, so gotta make a closure even though I'm not wrapping a luajit function ...
+			kernel.func_closure = ffi.cast('void(*)()', kernel.func)
+		end
+	end
+end
 
 
 function cl.clRetainKernel(kernel) end
