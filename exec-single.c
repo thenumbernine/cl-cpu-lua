@@ -152,18 +152,17 @@ typedef union {
 <? end -- cl.useCpp ?>
 
 typedef struct {
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
 EXPORT cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 extern size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
-
-#define get_local_size(n)	_program_<?=id?>_globalinfo.local_size[n]
-
-//this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
-#define get_enqueued_local_size(n)	_program_<?=id?>_globalinfo.local_size[n]
+extern size_t clcpu_private_local_size[<?=clDeviceMaxWorkItemDimension?>];
+uint get_work_dim();
+size_t get_global_size(int n);
+size_t get_local_size(int n);
+size_t get_enqueued_local_size(int n);
 
 #define get_num_groups(n)		_program_<?=id?>_globalinfo.num_groups[n]
 #define get_global_offset(n)	_program_<?=id?>_global_work_offset[n]
@@ -255,7 +254,7 @@ void _program_<?=id?>_execSingleThread(
 		++threadinfo->local_id[0],
 		++threadinfo->global_id[0]
 	) {
-		if (threadinfo->local_id[0] == globalinfo->local_size[0]) {
+		if (threadinfo->local_id[0] == clcpu_private_local_size[0]) {
 			threadinfo->local_id[0] = 0;
 			++threadinfo->group_id[0];
 		}
@@ -272,7 +271,7 @@ void _program_<?=id?>_execSingleThread(
 			++threadinfo->local_id[1],
 			++threadinfo->global_id[1]
 		) {
-			if (threadinfo->local_id[1] == globalinfo->local_size[1]) {
+			if (threadinfo->local_id[1] == clcpu_private_local_size[1]) {
 				threadinfo->local_id[1] = 0;
 				++threadinfo->group_id[1];
 			}
@@ -290,14 +289,14 @@ void _program_<?=id?>_execSingleThread(
 				++threadinfo->global_id[2],
 				++threadinfo->global_linear_id
 			) {
-				if (threadinfo->local_id[2] == globalinfo->local_size[2]) {
+				if (threadinfo->local_id[2] == clcpu_private_local_size[2]) {
 					threadinfo->local_id[2] = 0;
 					++threadinfo->group_id[2];
 				}
 
 				threadinfo->local_linear_id =
-					threadinfo->local_id[0] + globalinfo->local_size[0] * (
-						threadinfo->local_id[1] + globalinfo->local_size[1] * (
+					threadinfo->local_id[0] + clcpu_private_local_size[0] * (
+						threadinfo->local_id[1] + clcpu_private_local_size[1] * (
 							threadinfo->local_id[2]
 						)
 					)

@@ -11,7 +11,6 @@ typedef unsigned int uint;
 // so can I gcc it into an obj and g++ this into an obj and link fine into a lib?
 
 typedef struct {
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
@@ -19,6 +18,7 @@ extern cl_globalinfo_t _program_<?=id?>_globalinfo;
 
 extern "C" {
 extern size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
+extern size_t clcpu_private_local_size[<?=clDeviceMaxWorkItemDimension?>];
 }
 
 //unlike the singlethread implementation, 
@@ -89,25 +89,25 @@ extern "C" void _program_<?=id?>_execMultiThread(
 					is[0] = rest % clcpu_private_global_size[0];
 					rest -= is[0];
 					rest /= clcpu_private_global_size[0];
-					threadinfo->local_id[0] = is[0] % globalinfo->local_size[0];
-					threadinfo->group_id[0] = is[0] / globalinfo->local_size[0];
+					threadinfo->local_id[0] = is[0] % clcpu_private_local_size[0];
+					threadinfo->group_id[0] = is[0] / clcpu_private_local_size[0];
 					threadinfo->global_id[0] = is[0] + globalinfo->global_work_offset[0];
 					
 					is[1] = rest % clcpu_private_global_size[1];
 					rest -= is[1];
 					rest /= clcpu_private_global_size[1];
-					threadinfo->local_id[1] = is[1] % globalinfo->local_size[1];
-					threadinfo->group_id[1] = is[1] / globalinfo->local_size[1];
+					threadinfo->local_id[1] = is[1] % clcpu_private_local_size[1];
+					threadinfo->group_id[1] = is[1] / clcpu_private_local_size[1];
 					threadinfo->global_id[1] = is[1] + globalinfo->global_work_offset[1];
 					
 					is[2] = rest; // % clcpu_private_global_size[1];
-					threadinfo->local_id[2] = is[2] % globalinfo->local_size[2];
-					threadinfo->group_id[2] = is[2] / globalinfo->local_size[2];
+					threadinfo->local_id[2] = is[2] % clcpu_private_local_size[2];
+					threadinfo->group_id[2] = is[2] / clcpu_private_local_size[2];
 					threadinfo->global_id[2] = is[2] + globalinfo->global_work_offset[2];
 				
 					threadinfo->local_linear_id =
-						threadinfo->local_id[0] + globalinfo->local_size[0] * (
-							threadinfo->local_id[1] + globalinfo->local_size[1] * (
+						threadinfo->local_id[0] + clcpu_private_local_size[0] * (
+							threadinfo->local_id[1] + clcpu_private_local_size[1] * (
 								threadinfo->local_id[2]
 							)
 						)

@@ -6,7 +6,6 @@
 typedef unsigned int uint;
 
 typedef struct {
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
