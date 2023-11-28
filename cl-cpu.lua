@@ -1028,17 +1028,25 @@ local function prepareArgsDevices(numDevices, devices)
 	numDevices = ffi.cast('cl_uint', numDevices)
 	numDevices = tonumber(numDevices)
 
+--print("devices before cast", devices)
 	devices = ffi.cast('cl_device_id*', devices)
-	if (devices == nil and numDevices > 0)
-	or (devices ~= nil and numDevices == 0)
-	then
+--print("devices after cast", devices)
+	if devices == nil and numDevices > 0 then
+--print("devices was nil but numDevices > 0 was ", numDevices)
+		return ffi.C.CL_INVALID_VALUE
+	end
+	if devices ~= nil and numDevices == 0 then
+--print("devices wasn't nil", devices," but numDevices == 0")
 		return ffi.C.CL_INVALID_VALUE
 	end
 	-- make a local copy so program can hold onto it
 	local newDevices = ffi.new('cl_device_id[?]', numDevices)
 	for i=0,numDevices-1 do
 		local device, err = deviceCastAndVerify(devices[i])
-		if err then return err end
+		if err then
+--print("device["..i.."] wasn't really a device")
+			return err
+		end
 		newDevices[i] = device
 	end
 	devices = newDevices
@@ -1605,68 +1613,6 @@ function cl:getBuildEnv()
 		buildEnv = require 'ffi-c.c'
 	end
 
-	-- called from buildEnv:link stage
-	function buildEnv:addExtraObjFiles(objfiles, buildCtx)
-		if cl.clcpu_kernelCallMethod == 'C-multithread' then
-
-			-- TODO replace buildCtx.srcfile's suffix from self.srcSuffix to _multi .. self.srcSuffix
-			local name = self:getBuildDir()..'/'..buildCtx.name..'_multi'
-
-			local pushcompiler = buildCtx.env.compiler
-			local pushcppver = buildCtx.env.cppver
-			buildCtx.env.compiler = 'g++'
-
-			-- TODO this has to be done before postConfig()
-			-- or else it won't get baked into the compileFlags
-			-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
-			buildCtx.env.cppver = 'c++20'
-			-- so just do this
-			local pushcflags = buildCtx.env.compileFlags
-			buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++20')
-
-			-- I could use templates
-			-- I was using templates
-			-- but I need to pass the values through into the included file where the cl-cpu structs are
-			-- and I can't do that with templates (unless I further inline-and-template)
-			-- so instead I'll use macros
-			local nmacros = #buildCtx.env.macros
-			--buildCtx.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
-			--buildCtx.env.macros:insert('CLCPU_NUMCORES='..numcores)
-			-- on second thought, I can't use macros in the luajit ffi.cdef
-			-- so for that i'd have to replace stuff anyways
-			-- so meh might as well just use templates
-
-			local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
-			local srcfile = name..'.cpp'
-			local objfile = name..buildCtx.env.objSuffix
-
-			-- generate the file from the templated file
-			assert(path(srcfile):write(template(assert(path(srcsrcfile):read()), {
-				id = buildCtx.currentProgramID,
-				numcores = numcores,
-				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-				ffi_all_types = ffi_all_types,
-			})))
-
-			buildCtx.env.objLogFile = name..'-obj.log'	-- what's this for again?
-			local status, compileLog = buildCtx.env:buildObj(objfile, srcfile)
-			buildCtx.compileLog = buildCtx.compileLog..compileLog
-			if not status then
-				buildCtx.error = "failed to build c code"
-				error'here'	-- throwing away errors?
-				--return buildCtx
-			end
-
-			objfiles:insert(objfile)
-
-			buildCtx.env.macros = buildCtx.env.macros:sub(1, nmacros)
-
-			buildCtx.env.compiler = pushcompiler
-			buildCtx.env.cppver = pushcppver
-			buildCtx.env.compileFlags = pushcflags
-		end
-	end
-
 	return buildEnv
 end
 
@@ -1703,14 +1649,39 @@ local cl_program_verify = ffi.C.rand()
 local programsForID = table()
 
 local function programCastAndVerify(programHandle)
+--print(debug.traceback())
 	programHandle = ffi.cast('struct _cl_program*', programHandle)
-	if programHandle == nil
-	or programHandle[0].verify ~= cl_program_verify
-	or not programsForID[programHandle[0].id]
-	or programHandle ~= ffi.cast('cl_program', programsForID[programHandle[0].id].handle)
-	then
+--print(debug.traceback())
+	if programHandle == nil then
+--print(debug.traceback())
 		return nil, ffi.C.CL_INVALID_PROGRAM
 	end
+--print(debug.traceback())
+--print(programHandle)
+--print(programHandle[0])
+	if programHandle[0].verify ~= cl_program_verify then
+--print(debug.traceback())
+		return nil, ffi.C.CL_INVALID_PROGRAM
+	end
+--print(debug.traceback())
+	local program = programsForID[programHandle[0].id]
+--print(debug.traceback())
+	if not program then
+--print(debug.traceback())
+		return nil, ffi.C.CL_INVALID_PROGRAM
+	end
+--print(debug.traceback())
+	if not program.handle then
+--print(debug.traceback())
+		return nil, ffi.C.CL_INVALID_PROGRAM
+	end
+--print(debug.traceback())
+	if programHandle ~= ffi.cast('cl_program', program.handle) then
+		-- TODO or maybe an error for internal integrity check?
+--print(debug.traceback())
+		return nil, ffi.C.CL_INVALID_PROGRAM
+	end
+--print(debug.traceback())
 	return programHandle
 end
 
@@ -1847,8 +1818,8 @@ function cl.clGetProgramBuildInfo(programHandle, device, name, paramSize, result
 			getString = function(programHandle, device)
 				local program = assert(programsForID[programHandle[0].id])
 				local log = table()
-				log:insert(program.compileLog)
-				log:insert(program.linkLog)
+				log:insert(program.compileLog or '')
+				log:insert(program.linkLog or '')
 				return log:concat'\n'
 			end,
 		},
@@ -2133,7 +2104,7 @@ end
 
 -- just obj -> exe
 --cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
-function cl.clLinkProgram(context, numDevices, deviceList, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
+function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
 	local function returnError(err, program)
 		if errcodeRet ~= nil then errcodeRet[0] = err end
 		-- program can be nil or a cl_program.
@@ -2141,11 +2112,19 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 		return ffi.cast('cl_program', program)
  	end
 
+	local ctx, err = contextCastAndVerify(ctx)
+	if err then
+		return returnError(err)
+	end
+
 	-- [[ BEGIN matches clBuildProgram
 
 	local err
 	err, numDevices, devices = prepareArgsDevices(numDevices, devices)
-	if err ~= ffi.C.CL_SUCCESS then return err end
+	if err ~= ffi.C.CL_SUCCESS then
+--print("prepareArgsDevices failed")
+		return returnError(err)
+	end
 	-- TODO if device is still building a program then return CL_INVALID_OPERATION
 
 	options = ffi.cast('char*', options)
@@ -2157,6 +2136,7 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
 
 	if notify == nil and userData ~= nil then
+--print("notify was nil but userData wasn't nil ... CL_INVALID_VALUE")
 		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 
@@ -2165,10 +2145,11 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	-- numInputPrograms, inputProgramHandles
 	numInputPrograms = ffi.cast('cl_uint', numInputPrograms)
 	numInputPrograms = tonumber(numInputPrograms)
-	inputProgramHandles = ffi.cast('cl_program_id*', inputProgramHandles)
+	inputProgramHandles = ffi.cast('cl_program*', inputProgramHandles)
 	if (inputProgramHandles == nil and numInputPrograms > 0)
 	or (inputProgramHandles ~= nil and numInputPrograms == 0)
 	then
+--print("numInputPrograms vs inputProgramHandles disagreed ... CL_INVALID_VALUE")
 		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 
@@ -2176,6 +2157,7 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 	for i=0,numInputPrograms-1 do
 		local programHandle, err = programCastAndVerify(inputProgramHandles[i])
 		if err then
+--print("programCastAndVerify on inputProgramHandles["..i.."] failed")
 			return returnError(err)
 		end
 		local id = programHandle[0].id
@@ -2192,12 +2174,38 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 		programs:insert(program)
 	end
 
+	-- our new program ...
+	local programHandle = ffi.new'struct _cl_program[1]'
+	local id = #programsForID+1
+	programHandle[0].verify = cl_program_verify
+	programHandle[0].id = id
+	local program = {
+		id = id,
+		handle = programHandle,
+		-- no code
+		ctx = ctx,
+		status = ffi.C.CL_BUILD_NONE,
+		kernels = {},
+	}
+	programsForID[id] = program
+
+	-- clear results of previous build?
+	program.lib = nil
+	program.libfile = nil
+	program.libdata = nil
+	program.compileLog = nil
+	program.linkLog = nil
+	program.numDevices = nil
+	program.devices = nil
+	program.status = ffi.C.CL_BUILD_IN_PROGRESS
+	program.options = nil
 
 	local err = ffi.C.CL_SUCCESS
 
 	local headerCode
 	xpcall(function()
 		local buildEnv = cl:getBuildEnv()
+		--[[
 		if #programs == 1 then
 			-- just finish the buildctx process
 			local program = programs[1]
@@ -2212,12 +2220,39 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 
 			setupCLProgramHeader(program.id)
 		else
+		--]] do
+			local buildCtx = {}
+			local args = {}
+			buildEnv:setup(args, buildCtx)
+			if buildCtx.error then error(buildCtx.error) end
+			-- ... don't compile ...
+			function buildEnv:addExtraObjFiles(objfiles)
+				for i=#objfiles,1,-1 do objfiles[i] = nil end
+				objfiles:append(programs:mapi(function(program)
+					return (assert(program.buildCtx.objfile))
+				end))
+			end
+			buildEnv:link(args, buildCtx)
+			if buildCtx.error then error(buildCtx.error) end
+			buildEnv:load(args, buildCtx)
+			if buildCtx.error then error(buildCtx.error) end
+
 			-- TODO here, how to build from other builds ...
 			-- by skipping the code / :compile part, and by overriding the :addExtraObjFiles part
-			error("only one program at a time for now")
-			local buildCtx = buildEnv:build({
-				error'you are here'
-			})
+
+			setupCLProgramHeader(id)
+			local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
+
+			program.lib = buildCtx.lib
+			program.libfile = buildCtx.libfile
+			program.libdata = libdata
+			program.compileLog = buildCtx.compileLog
+			program.linkLog = buildCtx.linkLog
+			program.numDevices = numDevices
+			program.devices = programDevices
+			program.status = ffi.C.CL_BUILD_SUCCESS
+			program.options = options
+
 		end
 	end, function(err)
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
@@ -2227,8 +2262,7 @@ function cl.clLinkProgram(context, numDevices, deviceList, options, numInputProg
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
 
-error("need to make a new cl_program and return it...")
-	return returnError(err, newProgramID)
+	return returnError(err, programHandle)
 end
 
 -- source -> obj, then obj -> exe
@@ -2287,6 +2321,70 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 
 	xpcall(function()
 		local buildEnv = cl:getBuildEnv()
+
+		-- called from buildEnv:link stage
+		-- I'm going to change this whether it is clCompileProgram or clBuildProgram or clLinkProgram ...
+		function buildEnv:addExtraObjFiles(objfiles, buildCtx)
+			if cl.clcpu_kernelCallMethod == 'C-multithread' then
+
+				-- TODO replace buildCtx.srcfile's suffix from self.srcSuffix to _multi .. self.srcSuffix
+				local name = self:getBuildDir()..'/'..buildCtx.name..'_multi'
+
+				local pushcompiler = buildCtx.env.compiler
+				local pushcppver = buildCtx.env.cppver
+				buildCtx.env.compiler = 'g++'
+
+				-- TODO this has to be done before postConfig()
+				-- or else it won't get baked into the compileFlags
+				-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
+				buildCtx.env.cppver = 'c++20'
+				-- so just do this
+				local pushcflags = buildCtx.env.compileFlags
+				buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++20')
+
+				-- I could use templates
+				-- I was using templates
+				-- but I need to pass the values through into the included file where the cl-cpu structs are
+				-- and I can't do that with templates (unless I further inline-and-template)
+				-- so instead I'll use macros
+				local nmacros = #buildCtx.env.macros
+				--buildCtx.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
+				--buildCtx.env.macros:insert('CLCPU_NUMCORES='..numcores)
+				-- on second thought, I can't use macros in the luajit ffi.cdef
+				-- so for that i'd have to replace stuff anyways
+				-- so meh might as well just use templates
+
+				local srcsrcfile = cl.pathToCLCPU..'/exec-multi.cpp'
+				local srcfile = name..'.cpp'
+				local objfile = name..buildCtx.env.objSuffix
+
+				-- generate the file from the templated file
+				assert(path(srcfile):write(template(assert(path(srcsrcfile):read()), {
+					id = buildCtx.currentProgramID,
+					numcores = numcores,
+					clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+					ffi_all_types = ffi_all_types,
+				})))
+
+				buildCtx.env.objLogFile = name..'-obj.log'	-- what's this for again?
+				local status, compileLog = buildCtx.env:buildObj(objfile, srcfile)
+				buildCtx.compileLog = buildCtx.compileLog..compileLog
+				if not status then
+					buildCtx.error = "failed to build c code"
+					error'here'	-- throwing away errors?
+					--return buildCtx
+				end
+
+				objfiles:insert(objfile)
+
+				buildCtx.env.macros = buildCtx.env.macros:sub(1, nmacros)
+
+				buildCtx.env.compiler = pushcompiler
+				buildCtx.env.cppver = pushcppver
+				buildCtx.env.compileFlags = pushcflags
+			end
+		end
+
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
 		-- :compile - code -> .o file
