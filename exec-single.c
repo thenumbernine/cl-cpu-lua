@@ -58,7 +58,8 @@ using std::max;
 
 //TODO
 #define CLK_LOCAL_MEM_FENCE	0
-void barrier(int whatever) {}
+void _program_<?=id?>_barrier(int whatever) {}
+#define barrier _program_<?=id?>_barrier
 
 #define mix(a, b, t) 	((a) * (1. - t) + (b) * t)
 #define rsqrt(x)		(1. / sqrt(x))

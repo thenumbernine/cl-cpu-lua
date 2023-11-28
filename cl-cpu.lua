@@ -1606,6 +1606,10 @@ function cl:getBuildEnv()
 		buildEnv = require 'ffi-c.c'
 	end
 
+	-- don't clean up files upon gc
+	-- because this is deleting libraries that i'm trying to debug ...
+	function buildEnv:cleanup() end
+
 	return buildEnv
 end
 
@@ -1681,16 +1685,20 @@ end
 function cl.clRetainProgram(programHandle) end
 function cl.clReleaseProgram(programHandle) end
 
-local function getSymbols(libfn)
-print('libfn', libfn)
+local function getKernelName(program)
+	--[[ using nm on the .so
 	local cmd = table{
 		'nm -D -f just-symbols',
-		path(libfn):escape(),
+		path(program.libfile):escape(),
 	}:concat' '
 print('>> '..cmd)
 	local out = io.readproc(cmd)
 print(out)
 	return string.split(string.trim(out), '\n')
+	--]]
+	-- [[ using the kernels
+	return table.keys(program.kernels):sort()
+	--]]
 end
 
 cl.clGetProgramInfo = makeGetter{
@@ -1757,30 +1765,20 @@ cl.clGetProgramInfo = makeGetter{
 	[ffi.C.CL_PROGRAM_NUM_KERNELS] = {
 		type = 'size_t',
 		get = function(programHandle)
---print(programHandle)
---print'getting program for handle'
-			local program = assert(programsForID[programHandle[0].id])
-			assert(program.libname, "couldn't find a lib for this program")
---print(program)
---print(program.libname)
-			local symbols = getSymbols(program.libname)
---print(symbols)
---print(#symbols)
+			local programID = programHandle[0].id
+			local program = assert(programsForID[programID])
+			assert(program.libfile, "couldn't find a lib for this program")
+			local symbols = getKernelName(program)
 			return #symbols
 		end,
 	},
 	[ffi.C.CL_PROGRAM_KERNEL_NAMES] = {
 		type = 'char[]',
 		getString = function(programHandle)
---print(programHandle)
---print'getting program for handle'
-			local program = assert(programsForID[programHandle[0].id])
-			assert(program.libname, "couldn't find a lib for this program")
---print(program)
---print(program.libname)
-			local symbols = getSymbols(program.libname)
---print(symbols)
---print(symbols:concat';')
+			local programID = programHandle[0].id
+			local program = assert(programsForID[programID])
+			assert(program.libfile, "couldn't find a lib for this program")
+			local symbols = getKernelName(program)
 			return symbols:concat';'
 		end,
 	},
@@ -2242,16 +2240,26 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 			setupCLProgramHeader(id)
 			local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
 
+			local kernels = {}
+			-- is this safe?
+			-- will there be collisions? I suppose not if there have already been compiler link collisions.
+			-- will something get written later?  hmm...
+			for _,program in ipairs(programs) do
+				for k,v in pairs(program.kernels) do
+					kernels[k] = v
+				end
+			end
+
 			program.lib = buildCtx.lib
 			program.libfile = buildCtx.libfile
 			program.libdata = libdata
 			program.compileLog = buildCtx.compileLog
 			program.linkLog = buildCtx.linkLog
 			program.numDevices = numDevices
-			program.devices = programDevices
+			program.devices = devices
 			program.status = ffi.C.CL_BUILD_SUCCESS
 			program.options = options
-
+			program.kernels = kernels
 		end
 	end, function(err)
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
@@ -2415,7 +2423,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		program.compileLog = buildCtx.compileLog
 		program.linkLog = buildCtx.linkLog
 		program.numDevices = numDevices
-		program.devices = programDevices
+		program.devices = devices
 		program.status = ffi.C.CL_BUILD_SUCCESS
 		program.options = options
 
@@ -2556,6 +2564,10 @@ function cl.clCreateKernel(programHandle, kernelName, errPtr)
 			errPtr[0] = ffi.C.CL_INVALID_PROGRAM_EXECUTABLE
 		end
 		return ffi.cast('cl_kernel', nil)
+	end
+
+	if not program.code then
+		error("I see you are trying to clCreateKernel from a program that was linked ... hmmmm .... ")
 	end
 
 	local code = removeCommentsAndApplyContinuations(program.code)
