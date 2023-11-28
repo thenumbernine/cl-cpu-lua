@@ -234,13 +234,6 @@ then
 
 #include <ffi.h>
 
-// TODO maybe put these in their own library or something?
-// they are only used for cl-cpu , so ... how about compiling them into their own .so?
-<? for _,f in ipairs(ffi_all_types) do
-?>void ffi_<?=id?>_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
-<? end ?>
-
-
 void _program_<?=id?>_execSingleThread(
 	ffi_cif * cif,
 	void (*func)(),

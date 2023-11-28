@@ -1578,6 +1578,8 @@ end
 cl.useCpp = false
 cl.extraInclude = table()
 local buildEnv
+local ffiSetterLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
+local ffi_setter_for_ctype = {}
 function cl:getBuildEnv()
 	if buildEnv then return buildEnv end
 
@@ -1595,6 +1597,34 @@ function cl:getBuildEnv()
 	-- don't clean up files upon gc
 	-- because this is deleting libraries that i'm trying to debug ...
 	function buildEnv:cleanup() end
+
+	-- while we're here, do this once ... and with C only
+	ffiSetterLib = require 'ffi-c.c':build(template([[
+#include <ffi.h>
+
+// TODO maybe put these in their own library or something?
+// they are only used for cl-cpu , so ... how about compiling them into their own .so?
+<? for _,f in ipairs(ffi_all_types) do
+?>void ffi_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
+<? end ?>
+
+]], {
+		ffi_all_types = ffi_all_types,
+	}))
+
+	ffi.cdef(template([[
+typedef struct ffi_type;
+<? for _,f in ipairs(ffi_all_types) do ?>
+void ffi_set_<?=f[2]?>(ffi_type ** const);
+<? end ?>
+]], {
+		ffi_all_types = ffi_all_types,
+	}))
+
+	for _,f in ipairs(ffi_all_types) do
+		local k = tostring(ffi.typeof(f[1]))
+		ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
+	end
 
 	return buildEnv
 end
@@ -1851,7 +1881,6 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 			id = id,
 			vectorTypes = vectorTypes,
 			kernelCallMethod = cl.clcpu_kernelCallMethod,
-			ffi_all_types = ffi_all_types,
 			numcores = numcores,
 			cl = cl,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
@@ -1958,12 +1987,6 @@ or kernelCallMethod == 'C-multithread'
 then
 ?>
 
-typedef struct ffi_type;
-
-<? for _,f in ipairs(ffi_all_types) do ?>
-void ffi_<?=id?>_set_<?=f[2]?>(ffi_type ** const);
-<? end ?>
-
 typedef struct ffi_cif;
 
 void _program_<?=id?>_execSingleThread(
@@ -1986,7 +2009,6 @@ void _program_<?=id?>_execMultiThread(
 ]], 	{
 			id = id,
 			kernelCallMethod = cl.clcpu_kernelCallMethod,
-			ffi_all_types = ffi_all_types,
 			numcores = numcores,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 		})
@@ -2215,6 +2237,7 @@ print("tried to link program but source program has no buildCtx")
 			-- ... don't compile ...
 			function buildEnv:addExtraObjFiles(objfiles)
 				for i=#objfiles,1,-1 do objfiles[i] = nil end
+				objfiles:insert((assert(ffiSetterLib.objfile)))
 				objfiles:append(programs:mapi(function(program)
 					return (assert(program.buildCtx.objfile))
 				end))
@@ -2362,7 +2385,6 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 					id = buildCtx.currentProgramID,
 					numcores = numcores,
 					clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-					ffi_all_types = ffi_all_types,
 				})))
 
 				buildCtx.env.objLogFile = name..'-obj.log'	-- what's this for again?
@@ -2382,6 +2404,8 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 				buildCtx.env.cppver = pushcppver
 				buildCtx.env.compileFlags = pushcflags
 			end
+
+			objfiles:insert((assert(ffiSetterLib.objfile)))
 		end
 
 		-- this does ...
@@ -2500,7 +2524,7 @@ findProgramKernelsFromCode = function(program)
 
 	-- try to find all kernels in the code ...
 	for kernelName, sigargs in code:gmatch('kernel%s+void%s+([a-zA-Z_][a-zA-Z0-9_]*)%s*%(([^)]*)%)') do
-print("found kernel", kernelName, "with signature", sigargs)
+--print("found kernel", kernelName, "with signature", sigargs)
 
 		-- split by comma and parse each arg separately
 		-- let's hope there's no macros in there with commas in them
@@ -2612,7 +2636,7 @@ bindProgramKernels = function(program)
 
 			kernel.ffi_rtype = ffi.new('ffi_type*[1]')
 			local lib = assert(program.lib, "couldn't find program.lib")
-			lib['ffi_'..program.id..'_set_void'](kernel.ffi_rtype)	-- kernel always returns void
+			lib['ffi_set_void'](kernel.ffi_rtype)	-- kernel always returns void
 
 			kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
 			kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
@@ -2622,9 +2646,9 @@ bindProgramKernels = function(program)
 				if argInfo.isGlobal
 				or argInfo.isConstant
 				then
-					lib['ffi_'..program.id..'_set_pointer'](ffi_atypes+i-1)
+					lib['ffi_set_pointer'](ffi_atypes+i-1)
 				elseif argInfo.isLocal then
-					lib['ffi_'..program.id..'_set_pointer'](ffi_atypes+i-1)
+					lib['ffi_set_pointer'](ffi_atypes+i-1)
 				else
 					-- TODO how to detect the type of the arg?
 					-- all the CL API cares about is the sizeof
@@ -2634,12 +2658,6 @@ bindProgramKernels = function(program)
 					-- so I have to consult luajit's ffi for more info
 					-- TODO better way to do this?
 					local k = tostring(ffi.typeof(argInfo.type))
-
-					local ffi_setter_for_ctype = {}
-					for _,f in ipairs(ffi_all_types) do
-						local k = tostring(ffi.typeof(f[1]))
-						ffi_setter_for_ctype[k] = 'ffi_'..program.id..'_set_'..f[2]
-					end
 
 					local settername = ffi_setter_for_ctype[k]
 					if not settername then
