@@ -11,13 +11,15 @@ typedef unsigned int uint;
 // so can I gcc it into an obj and g++ this into an obj and link fine into a lib?
 
 typedef struct {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
 extern cl_globalinfo_t _program_<?=id?>_globalinfo;
+
+extern "C" {
+extern size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
+}
 
 //unlike the singlethread implementation, 
 // the multithread implementation needs a unique one of these per-thread.
@@ -58,6 +60,7 @@ extern "C" void _program_<?=id?>_execMultiThread(
 	void (*func)(),
 	void ** values
 ) {
+
 #if 0	//single-thread in multi-thread/cpp file
 	_program_<?=id?>_execSingleThread(cif, func, values);
 #else	//multithread
@@ -67,9 +70,9 @@ extern "C" void _program_<?=id?>_execMultiThread(
 	std::iota(cpuids.begin(), cpuids.end(), 0);
 	std::vector<std::future<bool>> handles(<?=numcores?>);
 
-	size_t size = globalinfo->global_size[0]
-		* globalinfo->global_size[1]
-		* globalinfo->global_size[2];
+	size_t size = clcpu_private_global_size[0]
+		* clcpu_private_global_size[1]
+		* clcpu_private_global_size[2];
 
 	for (size_t coreid = 0; coreid < <?=numcores?>; ++coreid) {
 		handles[coreid] = std::async(std::launch::async,
@@ -83,21 +86,21 @@ extern "C" void _program_<?=id?>_execMultiThread(
 				
 					size_t is[<?=clDeviceMaxWorkItemDimension?>];
 					size_t rest = i;
-					is[0] = rest % globalinfo->global_size[0];
+					is[0] = rest % clcpu_private_global_size[0];
 					rest -= is[0];
-					rest /= globalinfo->global_size[0];
+					rest /= clcpu_private_global_size[0];
 					threadinfo->local_id[0] = is[0] % globalinfo->local_size[0];
 					threadinfo->group_id[0] = is[0] / globalinfo->local_size[0];
 					threadinfo->global_id[0] = is[0] + globalinfo->global_work_offset[0];
 					
-					is[1] = rest % globalinfo->global_size[1];
+					is[1] = rest % clcpu_private_global_size[1];
 					rest -= is[1];
-					rest /= globalinfo->global_size[1];
+					rest /= clcpu_private_global_size[1];
 					threadinfo->local_id[1] = is[1] % globalinfo->local_size[1];
 					threadinfo->group_id[1] = is[1] / globalinfo->local_size[1];
 					threadinfo->global_id[1] = is[1] + globalinfo->global_work_offset[1];
 					
-					is[2] = rest; // % globalinfo->global_size[1];
+					is[2] = rest; // % clcpu_private_global_size[1];
 					threadinfo->local_id[2] = is[2] % globalinfo->local_size[2];
 					threadinfo->group_id[2] = is[2] / globalinfo->local_size[2];
 					threadinfo->global_id[2] = is[2] + globalinfo->global_work_offset[2];

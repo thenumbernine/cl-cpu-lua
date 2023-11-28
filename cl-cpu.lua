@@ -1584,6 +1584,7 @@ local cl_kernel_verify = ffi.C.rand()
 
 local kernelsForID = table()
 
+local clcpuGlobalLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
 local ffi_setter_for_ctype = {}
 
 local function kernelCastAndVerify(kernelHandle)
@@ -1751,7 +1752,7 @@ local function bindProgramKernels(program)
 			kernel.ffi_atypes = ffi_atypes
 
 			kernel.ffi_rtype = ffi.new('ffi_type*[1]')
-			local lib = assert(program.lib, "couldn't find program.lib")
+			local lib = assert(clcpuGlobalLib.lib)
 			lib['ffi_set_void'](kernel.ffi_rtype)	-- kernel always returns void
 
 			kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
@@ -1806,7 +1807,6 @@ end
 cl.useCpp = false
 cl.extraInclude = table()
 local buildEnv
-local clcpuGlobalLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
 function cl:getBuildEnv()
 	if buildEnv then return buildEnv end
 
@@ -1835,16 +1835,48 @@ function cl:getBuildEnv()
 ?>void ffi_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
 <? end ?>
 
+// I can put the code shared by all programs in this one place
+// hmm and I need to linking against the clcpu global tmp lib
+
+typedef unsigned char uchar;
+typedef unsigned short ushort;
+typedef unsigned int uint;
+typedef unsigned long ulong;
+
+// private variables:
+
+uint clcpu_private_work_dim = 0;
+size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
+
+// opencl api:
+
+uint get_work_dim() {
+	return clcpu_private_work_dim;
+}
+
+size_t get_global_size(int n) {
+	return clcpu_private_global_size[n];
+}
 ]], {
 		ffi_all_types = ffi_all_types,
+		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 	}))
 
 	ffi.cdef(template([[
 <? for _,f in ipairs(ffi_all_types) do ?>
 void ffi_set_<?=f[2]?>(ffi_type ** const);
 <? end ?>
+
+typedef unsigned char uchar;
+typedef unsigned short ushort;
+typedef unsigned int uint;
+typedef unsigned long ulong;
+
+extern uint clcpu_private_work_dim;
+extern size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
 ]], {
 		ffi_all_types = ffi_all_types,
+		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 	}))
 
 	for _,f in ipairs(ffi_all_types) do
@@ -2182,8 +2214,6 @@ local function setupCLProgramHeader(id)
 
 //everything accessible everywhere goes here
 typedef struct cl_globalinfo_t_<?=id?> {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
@@ -2443,7 +2473,12 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 		-- ... don't compile ...
 		function buildEnv:addExtraObjFiles(objfiles)
 			for i=#objfiles,1,-1 do objfiles[i] = nil end
-			objfiles:insert((assert(clcpuGlobalLib.objfile)))
+			
+			-- link against .o file to make the .so ...
+			--objfiles:insert((assert(clcpuGlobalLib.objfile)))
+			-- link against .so file to make the .so ...
+			objfiles:insert((assert(clcpuGlobalLib.libfile)))
+			
 			objfiles:append(programs:mapi(function(srcProgram)
 				return (assert(srcProgram.buildCtx.objfile))
 			end))
@@ -2626,7 +2661,10 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 				buildCtx.env.compileFlags = pushcflags
 			end
 
-			objfiles:insert((assert(clcpuGlobalLib.objfile)))
+			-- link against .o file to make the .so ...
+			--objfiles:insert((assert(clcpuGlobalLib.objfile)))
+			-- link against .so file to make the .so ...
+			objfiles:insert((assert(clcpuGlobalLib.libfile)))
 		end
 
 		-- this does ...
@@ -3072,10 +3110,10 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 	end
 --print'assigning globals...'
 	local globalinfo = lib['_program_'..pid..'_globalinfo']
-	globalinfo.work_dim = workDim
+	clcpuGlobalLib.lib.clcpu_private_work_dim = workDim
 	for n=0,clDeviceMaxWorkItemDimension-1 do
+		clcpuGlobalLib.lib.clcpu_private_global_size[n] = global_work_size_v[n+1]
 		globalinfo.local_size[n] = local_work_size_v[n+1]
-		globalinfo.global_size[n] = global_work_size_v[n+1]
 		globalinfo.num_groups[n] = num_groups_v[n+1]
 		globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 	end

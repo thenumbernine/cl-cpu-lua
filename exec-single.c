@@ -29,7 +29,6 @@ else
 end
 ?>
 
-
 <? if not cl.useCpp then ?>
 
 // "constant" is the name of a variable used in bits/timex.h, so ... you can't do this ...
@@ -153,16 +152,14 @@ typedef union {
 <? end -- cl.useCpp ?>
 
 typedef struct {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t;
 EXPORT cl_globalinfo_t _program_<?=id?>_globalinfo;
 
-#define get_work_dim()		_program_<?=id?>_globalinfo.work_dim
-#define get_global_size(n)	_program_<?=id?>_globalinfo.global_size[n]
+extern size_t clcpu_private_global_size[<?=clDeviceMaxWorkItemDimension?>];
+
 #define get_local_size(n)	_program_<?=id?>_globalinfo.local_size[n]
 
 //this one is supposed to give back the auto-determined size for when clEnqueueNDRangeKernel local_size = NULL
@@ -252,7 +249,7 @@ void _program_<?=id?>_execSingleThread(
 		threadinfo->group_id[0] = 0,
 		threadinfo->global_id[0] = globalinfo->global_work_offset[0];
 
-		is[0] < globalinfo->global_size[0];
+		is[0] < clcpu_private_global_size[0];
 
 		++is[0],
 		++threadinfo->local_id[0],
@@ -269,7 +266,7 @@ void _program_<?=id?>_execSingleThread(
 			threadinfo->group_id[1] = 0,
 			threadinfo->global_id[1] = globalinfo->global_work_offset[1];
 
-			is[1] < globalinfo->global_size[1];
+			is[1] < clcpu_private_global_size[1];
 
 			++is[1],
 			++threadinfo->local_id[1],
@@ -286,7 +283,7 @@ void _program_<?=id?>_execSingleThread(
 				threadinfo->group_id[2] = 0,
 				threadinfo->global_id[2] = globalinfo->global_work_offset[2];
 
-				is[2] < globalinfo->global_size[2];
+				is[2] < clcpu_private_global_size[2];
 
 				++is[2],
 				++threadinfo->local_id[2],
