@@ -23,7 +23,7 @@ end
 ?>
 
 
-#if !defined(__cplusplus)
+<? if not cl.useCpp then ?>
 
 // "constant" is the name of a variable used in bits/timex.h, so ... you can't do this ...
 // unless you can think of a name to define it as which doubles as both a valid c++ name and is an argument attribute that degenerates to nothing.
@@ -43,7 +43,7 @@ typedef char bool;
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #define clamp(x,_min,_max)	min(_max,max(_min,x))
 
-#else	//__cplusplus
+<? else -- cl.useCpp ?>
 
 #define CLCPU_ENABLED
 
@@ -52,7 +52,7 @@ using std::clamp;
 using std::min;
 using std::max;
 
-#endif	//__cplusplus
+<? end -- cl.useCpp ?>
 
 #include <stddef.h>
 
@@ -75,6 +75,41 @@ typedef unsigned long ulong;
 // TODO half?
 //typedef __fp16 half;
 
+<? if cl.useCpp then ?>
+
+<? for _,base in ipairs(vectorTypes) do ?>
+union <?=base?>2 {
+	struct { <?=base?> x, y; };
+	struct { <?=base?> s0, s1; };
+	<?=base?> s[2];
+	<?=base?>2() {}
+	<?=base?>2(<?=base?> const x_, <?=base?> const y_) { x = x_; y = y_; }
+} __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*2?>)));
+
+union <?=base?>3 {
+	struct { <?=base?> x, y, z; };
+	struct { <?=base?> s0, s1, s2; };
+	<?=base?> s[3];
+	<?=base?>3() {}
+	<?=base?>3(<?=base?> const x_, <?=base?> const y_, <?=base?> const z_) { x = x_; y = y_; z = z_; }
+} __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*4?>)));
+
+union <?=base?>4 {
+	struct { <?=base?> x, y, z, w; };
+	struct { <?=base?> s0, s1, s2, s3; };
+	<?=base?> s[4];
+	<?=base?>4() {}
+	<?=base?>4(<?=base?> const x_, <?=base?> const y_, <?=base?> const z_, <?=base?> const w_) { x = x_; y = y_; z = z_; w = w_; }
+} __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*4?>)));
+
+union <?=base?>8 {
+	struct { <?=base?> x, y, z, w; };
+	struct { <?=base?> s0, s1, s2, s3, s4, s5, s6, s7; };
+	<?=base?> s[8];
+} __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*8?>)));
+<? end ?>
+
+<? else -- cl.useCpp ?>
 
 <? for _,base in ipairs(vectorTypes) do ?>
 typedef union {
@@ -95,15 +130,19 @@ typedef union {
 	<?=base?> s[4];
 } <?=base?>4 __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*4?>)));
 
-#define _<?=base?>2(a,b)		(<?=base?>2){.s={a,b}}
-#define _<?=base?>4(a,b,c,d)	(<?=base?>4){.s={a,b,c,d}}
-
 typedef union {
 	struct { <?=base?> x, y, z, w; };
 	struct { <?=base?> s0, s1, s2, s3, s4, s5, s6, s7; };
 	<?=base?> s[8];
 } <?=base?>8 __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*8?>)));
+
+//I replace all the (int4)(a,b,c,d) with _int4(a,b,c,d) in cl-cpu.lua
+#define _<?=base?>2(a,b)		(<?=base?>2){.s={a,b}}
+#define _<?=base?>4(a,b,c,d)	(<?=base?>4){.s={a,b,c,d}}
+
 <? end ?>
+
+<? end -- cl.useCpp ?>
 
 typedef struct {
 	uint work_dim;
@@ -148,7 +187,7 @@ extern size_t _program_<?=id?>_currentthreadindex();
 #define get_local_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].local_id[n]
 #define get_group_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].group_id[n]
 
-#if defined(__cplusplus)
+<? if cl.useCpp then ?>
 
 inline int4 operator+(int4 const & a, int4 const & b) {
 	return int4{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
@@ -160,7 +199,7 @@ inline int4 operator*(int4 const & a, int const b) {
 	return int4{a.x * b, a.y * b, a.z * b, a.w * b};
 }
 
-#else	//__cplusplus
+<? else -- cl.useCpp ?>
 
 static int4 int4_add(int4 a, int4 b) {
 	return (int4){
@@ -171,7 +210,7 @@ static int4 int4_add(int4 a, int4 b) {
 	};
 }
 
-#endif	//__cplusplus
+<? end -- cl.useCpp ?>
 
 // TODO should include isfinite(x) ? NAN : ...
 #define sign(x)	((x) > 0 ? 1 : ((x) < 0 ? -1 : 0))

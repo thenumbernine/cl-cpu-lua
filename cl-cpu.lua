@@ -1834,6 +1834,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 			kernelCallMethod = cl.clcpu_kernelCallMethod,
 			ffi_all_types = ffi_all_types,
 			numcores = numcores,
+			cl = cl,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 		}),
 	}
@@ -1849,17 +1850,24 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 --print('replacing realtype '..realtype)
 			code = code:gsub('%(real'..n..'%)', '('..realtype..n..')')
 		end
-		for _,base in ipairs(vectorTypes) do
-			code = code:gsub('%('..base..n..'%)%(', '_'..base..n..'(')
+		
+		if cl.useCpp then	-- convert .cl to .cpp
+			for _,base in ipairs(vectorTypes) do
+				code = code:gsub('%('..base..n..'%)%(', base..n..'(')
+			end
+		else	-- convert .cl to .c
+			for _,base in ipairs(vectorTypes) do
+				code = code:gsub('%('..base..n..'%)%(', '_'..base..n..'(')
+			end
+
+			-- hmm, opencl allows for (type#)(...) initializers for vectors
+			-- how to convert this to C ?
+
+			-- opencl also overloads arithmetic operators ...
+			code = code:gsub('i %+= _int'..n..'%(([^)]*)%)', function(inside)
+				return 'i = int'..n..'_add(i,_int'..n..'('..inside..'))'
+			end)
 		end
-
-		-- hmm, opencl allows for (type#)(...) initializers for vectors
-		-- how to convert this to C ?
-
-		-- opencl also overloads arithmetic operators ...
-		code = code:gsub('i %+= _int'..n..'%(([^)]*)%)', function(inside)
-			return 'i = int'..n..'_add(i,_int'..n..'('..inside..'))'
-		end)
 	end
 
 	-- replace #pragma OPENCL with comments
@@ -2062,8 +2070,9 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		program.buildArgs = args
 		program.buildCtx = buildCtx
 	end, function(err)
-		io.stderr:write('code:', '\n')
-		io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
+		-- this is still in the temp file so ...
+		--io.stderr:write('code:', '\n')
+		--io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
@@ -2283,8 +2292,9 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		program.options = options
 
 	end, function(err)
-		io.stderr:write('code:', '\n')
-		io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
+		-- this is still in the temp file so ...
+		--io.stderr:write('code:', '\n')
+		--io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
