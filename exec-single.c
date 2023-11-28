@@ -192,6 +192,9 @@ extern size_t _program_<?=id?>_currentthreadindex();
 inline int4 operator+(int4 const & a, int4 const & b) {
 	return int4{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
 }
+inline int4 operator-(int4 const & a, int4 const & b) {
+	return int4{a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w};
+}
 inline int4 operator*(int const a, int4 const & b) {
 	return int4{a * b.x, a * b.y, a * b.z, a * b.w};
 }
