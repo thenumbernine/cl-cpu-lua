@@ -16,9 +16,9 @@ typedef struct {
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} cl_globalinfo_t;
+} clcpu_private_globalinfo_t;
 extern "C" {
-extern cl_globalinfo_t clcpu_private_globalinfo;
+extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
 }
 
 //unlike the singlethread implementation, 
@@ -31,7 +31,9 @@ typedef struct {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
-extern cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
+extern "C" {
+extern cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+}
 
 //// TODO END CL_CPU.H
 
@@ -47,12 +49,12 @@ extern "C" void _program_<?=id?>_execSingleThread(
 	void ** values
 );
 
-static thread_local size_t threadIndexForID = {};
+static thread_local size_t clcpu_private_threadIndexForID = {};
 
 #include <iostream>
 
 extern "C" size_t _program_<?=id?>_currentthreadindex() {
-	return threadIndexForID;
+	return clcpu_private_threadIndexForID;
 }
 
 extern "C" void _program_<?=id?>_execMultiThread(
@@ -63,7 +65,7 @@ extern "C" void _program_<?=id?>_execMultiThread(
 #if 0	//single-thread in multi-thread/cpp file
 	_program_<?=id?>_execSingleThread(cif, func, values);
 #else	//multithread
-	cl_globalinfo_t * globalinfo = &clcpu_private_globalinfo;
+	clcpu_private_globalinfo_t * globalinfo = &clcpu_private_globalinfo;
 
 	static std::vector<size_t> cpuids;
 	std::iota(cpuids.begin(), cpuids.end(), 0);
@@ -76,8 +78,8 @@ extern "C" void _program_<?=id?>_execMultiThread(
 	for (size_t coreid = 0; coreid < <?=numcores?>; ++coreid) {
 		handles[coreid] = std::async(std::launch::async,
 			[size, globalinfo, cif, func, values](size_t coreid) -> bool {
-				threadIndexForID = coreid;
-				cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo + coreid;
+				clcpu_private_threadIndexForID = coreid;
+				cl_threadinfo_t * threadinfo = clcpu_private_threadinfo + coreid;
 				size_t ibegin = size * coreid / <?=numcores?>;
 				size_t iend = size * (coreid+1) / <?=numcores?>;
 				for (size_t i = ibegin; i < iend; ++i) {

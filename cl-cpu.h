@@ -11,8 +11,8 @@ typedef struct {
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} cl_globalinfo_t;
-extern cl_globalinfo_t clcpu_private_globalinfo;
+} clcpu_private_globalinfo_t;
+extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
 
 //unlike the singlethread implementation, 
 // the multithread implementation needs a unique one of these per-thread.
@@ -24,4 +24,4 @@ typedef struct {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
-extern cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
+extern cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];

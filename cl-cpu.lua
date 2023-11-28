@@ -1851,8 +1851,17 @@ typedef struct {
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} cl_globalinfo_t;
-cl_globalinfo_t clcpu_private_globalinfo;
+} clcpu_private_globalinfo_t;
+clcpu_private_globalinfo_t clcpu_private_globalinfo;
+
+typedef struct {
+	size_t global_linear_id;
+	size_t local_linear_id;
+	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
+} cl_threadinfo_t;
+cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
 
 // opencl api:
 
@@ -1883,6 +1892,7 @@ size_t get_global_offset(int n) {
 ]], {
 		ffi_all_types = ffi_all_types,
 		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+		numcores = numcores,
 	}))
 
 	ffi.cdef(template([[
@@ -1901,12 +1911,21 @@ typedef struct {
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} cl_globalinfo_t;
-extern cl_globalinfo_t clcpu_private_globalinfo;
+} clcpu_private_globalinfo_t;
+extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
 
+typedef struct {
+	size_t global_linear_id;
+	size_t local_linear_id;
+	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
+} cl_threadinfo_t;
+extern cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
 ]], {
 		ffi_all_types = ffi_all_types,
 		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+		numcores = numcores,
 	}))
 
 	for _,f in ipairs(ffi_all_types) do
@@ -2244,10 +2263,13 @@ local function setupCLProgramHeader(id)
 
 //everything accessible everywhere goes here
 typedef struct cl_globalinfo_t_<?=id?> {
+	uint work_dim;
+	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
+	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
 } cl_globalinfo_t_<?=id?>;
-cl_globalinfo_t_<?=id?> _program_<?=id?>_globalinfo;
-
+cl_globalinfo_t_<?=id?> clcpu_private_globalinfo;
 
 // everything in the following need to know which core you're on:
 typedef struct cl_threadinfo_t_<?=id?> {
@@ -2257,7 +2279,7 @@ typedef struct cl_threadinfo_t_<?=id?> {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t_<?=id?>;
-cl_threadinfo_t_<?=id?> _program_<?=id?>_threadinfo[<?=numcores?>];
+cl_threadinfo_t_<?=id?> clcpu_private_threadinfo[<?=numcores?>];
 
 
 
@@ -2720,7 +2742,6 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
 
-print("clBuildProgram GOT LIB FOR PROGRAM "..buildCtx.srcfile)
 		program.lib = assert(buildCtx.lib)
 		program.libfile = buildCtx.libfile
 		program.libdata = libdata
@@ -3148,7 +3169,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
 	if cl.clcpu_kernelCallMethod == 'Lua' then
-		local threadinfo = lib['_program_'..pid..'_threadinfo']
+		local threadinfo = lib.clclpu_private_threadinfo
 
 		threadinfo[0].global_linear_id = 0
 		local is = {}

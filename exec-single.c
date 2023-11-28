@@ -158,8 +158,8 @@ typedef struct {
 	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
 	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
 	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} cl_globalinfo_t;
-EXPORT extern cl_globalinfo_t clcpu_private_globalinfo;
+} clcpu_private_globalinfo_t;
+EXPORT extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
 
 uint get_work_dim();
 size_t get_global_size(int n);
@@ -176,7 +176,7 @@ typedef struct {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } cl_threadinfo_t;
-EXPORT cl_threadinfo_t _program_<?=id?>_threadinfo[<?=numcores?>];
+EXPORT cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
 
 
 <? if kernelCallMethod == 'C-multithread' then ?>
@@ -185,11 +185,11 @@ extern size_t _program_<?=id?>_currentthreadindex();
 #define _program_<?=id?>_currentthreadindex()	0
 <? end ?>
 
-#define get_global_linear_id() 	_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].global_linear_id
-#define get_local_linear_id() 	_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].local_linear_id
-#define get_global_id(n)		_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].global_id[n]
-#define get_local_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].local_id[n]
-#define get_group_id(n)			_program_<?=id?>_threadinfo[_program_<?=id?>_currentthreadindex()].group_id[n]
+#define get_global_linear_id() 	clcpu_private_threadinfo[_program_<?=id?>_currentthreadindex()].global_linear_id
+#define get_local_linear_id() 	clcpu_private_threadinfo[_program_<?=id?>_currentthreadindex()].local_linear_id
+#define get_global_id(n)		clcpu_private_threadinfo[_program_<?=id?>_currentthreadindex()].global_id[n]
+#define get_local_id(n)			clcpu_private_threadinfo[_program_<?=id?>_currentthreadindex()].local_id[n]
+#define get_group_id(n)			clcpu_private_threadinfo[_program_<?=id?>_currentthreadindex()].group_id[n]
 
 <? if cl.useCpp then ?>
 
@@ -235,8 +235,8 @@ void _program_<?=id?>_execSingleThread(
 	void (*func)(),
 	void ** values
 ) {
-	cl_globalinfo_t * globalinfo = &clcpu_private_globalinfo;
-	cl_threadinfo_t * threadinfo = _program_<?=id?>_threadinfo;
+	clcpu_private_globalinfo_t * globalinfo = &clcpu_private_globalinfo;
+	cl_threadinfo_t * threadinfo = clcpu_private_threadinfo;
 
 	threadinfo->global_linear_id = 0;
 
