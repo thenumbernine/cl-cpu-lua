@@ -1,3 +1,7 @@
+// here's stuff that goes in one place for everyone
+// but just cpp
+// esp for multithreading
+
 // ok I could use a c based threadpool
 // but instead I'm just going to use std::async
 
@@ -5,10 +9,6 @@
 typedef unsigned int uint;
 
 //// TODO BEGIN CL_CPU.H
-
-//these globals should be in the cl kernel program's obj
-// that means I'll have to lua-template this to replace the <?=id?>'s with the program id
-// so can I gcc it into an obj and g++ this into an obj and link fine into a lib?
 
 typedef struct {
 	uint work_dim;
@@ -30,9 +30,9 @@ typedef struct {
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} cl_threadinfo_t;
+} clcpu_private_threadinfo_t;
 extern "C" {
-extern cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+extern clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
 }
 
 //// TODO END CL_CPU.H
@@ -43,7 +43,7 @@ extern cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
 
 #include <ffi.h>
 
-extern "C" void _program_<?=id?>_execSingleThread(
+extern "C" void clcpu_private_execSingleThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values
@@ -60,17 +60,17 @@ extern "C" void _program_<?=id?>_execSingleThread(
 
 static thread_local size_t clcpu_private_threadIndexForID = {};
 
-extern "C" size_t _program_<?=id?>_currentthreadindex() {
+extern "C" size_t clcpu_private_currentthreadindex() {
 	return clcpu_private_threadIndexForID;
 }
 
-extern "C" void _program_<?=id?>_execMultiThread(
+extern "C" void clcpu_private_execMultiThread(
 	ffi_cif * cif,
 	void (*func)(),
 	void ** values
 ) {
 #if 0	//single-thread in multi-thread/cpp file
-	_program_<?=id?>_execSingleThread(cif, func, values);
+	clcpu_private_execSingleThread(cif, func, values);
 #else	//multithread
 	clcpu_private_globalinfo_t * globalinfo = &clcpu_private_globalinfo;
 
@@ -86,7 +86,7 @@ extern "C" void _program_<?=id?>_execMultiThread(
 		handles[coreid] = std::async(std::launch::async,
 			[size, globalinfo, cif, func, values](size_t coreid) -> bool {
 				clcpu_private_threadIndexForID = coreid;
-				cl_threadinfo_t * threadinfo = clcpu_private_threadinfo + coreid;
+				clcpu_private_threadinfo_t * threadinfo = clcpu_private_threadinfo + coreid;
 				size_t ibegin = size * coreid / <?=numcores?>;
 				size_t iend = size * (coreid+1) / <?=numcores?>;
 				for (size_t i = ibegin; i < iend; ++i) {

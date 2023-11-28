@@ -36,8 +36,8 @@ typedef struct {
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} cl_threadinfo_t;
-cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+} clcpu_private_threadinfo_t;
+clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
 
 // opencl api:
 
@@ -68,3 +68,123 @@ size_t get_global_offset(int n) {
 
 //TODO
 void barrier(int) {}
+
+<?
+if cl.clcpu_kernelCallMethod == 'C-multithread' then
+?>
+// defined in clcpu-core-multi.cpp
+size_t clcpu_private_currentthreadindex();
+<? else ?>
+#define clcpu_private_currentthreadindex() 0
+<? end ?>
+
+size_t get_global_linear_id() {
+	return clcpu_private_threadinfo[clcpu_private_currentthreadindex()].global_linear_id;
+}
+
+size_t get_local_linear_id() {
+	return clcpu_private_threadinfo[clcpu_private_currentthreadindex()].local_linear_id;
+}
+
+size_t get_global_id(int n) {
+	return clcpu_private_threadinfo[clcpu_private_currentthreadindex()].global_id[n];
+}
+
+size_t get_local_id(int n) {
+	return clcpu_private_threadinfo[clcpu_private_currentthreadindex()].local_id[n];
+}
+
+size_t get_group_id(int n) {
+	return clcpu_private_threadinfo[clcpu_private_currentthreadindex()].group_id[n];
+}
+
+
+<?
+if cl.clcpu_kernelCallMethod == 'C-singlethread'
+or cl.clcpu_kernelCallMethod == 'C-multithread'
+then
+?>
+
+#include <ffi.h>
+
+void clcpu_private_execSingleThread(
+	ffi_cif * cif,
+	void (*func)(),
+	void ** values
+) {
+
+	clcpu_private_globalinfo_t * globalinfo = &clcpu_private_globalinfo;
+	clcpu_private_threadinfo_t * threadinfo = clcpu_private_threadinfo;
+
+	threadinfo->global_linear_id = 0;
+
+	size_t is[<?=clDeviceMaxWorkItemDimension?>];
+
+	is[0] = 0;
+	for (
+		threadinfo->local_id[0] = 0,
+		threadinfo->group_id[0] = 0,
+		threadinfo->global_id[0] = globalinfo->global_work_offset[0];
+
+		is[0] < globalinfo->global_size[0];
+
+		++is[0],
+		++threadinfo->local_id[0],
+		++threadinfo->global_id[0]
+	) {
+		if (threadinfo->local_id[0] == globalinfo->local_size[0]) {
+			threadinfo->local_id[0] = 0;
+			++threadinfo->group_id[0];
+		}
+
+		is[1] = 0;
+		for (
+			threadinfo->local_id[1] = 0,
+			threadinfo->group_id[1] = 0,
+			threadinfo->global_id[1] = globalinfo->global_work_offset[1];
+
+			is[1] < globalinfo->global_size[1];
+
+			++is[1],
+			++threadinfo->local_id[1],
+			++threadinfo->global_id[1]
+		) {
+			if (threadinfo->local_id[1] == globalinfo->local_size[1]) {
+				threadinfo->local_id[1] = 0;
+				++threadinfo->group_id[1];
+			}
+
+			is[2] = 0;
+			for (
+				threadinfo->local_id[2] = 0,
+				threadinfo->group_id[2] = 0,
+				threadinfo->global_id[2] = globalinfo->global_work_offset[2];
+
+				is[2] < globalinfo->global_size[2];
+
+				++is[2],
+				++threadinfo->local_id[2],
+				++threadinfo->global_id[2],
+				++threadinfo->global_linear_id
+			) {
+				if (threadinfo->local_id[2] == globalinfo->local_size[2]) {
+					threadinfo->local_id[2] = 0;
+					++threadinfo->group_id[2];
+				}
+
+				threadinfo->local_linear_id =
+					threadinfo->local_id[0] + globalinfo->local_size[0] * (
+						threadinfo->local_id[1] + globalinfo->local_size[1] * (
+							threadinfo->local_id[2]
+						)
+					)
+				;
+
+				void *tmpret;
+				ffi_call(cif, func, &tmpret, values);
+			}
+		}
+	}
+}
+
+<? end -- cl.clcpu_kernelCallMethod == 'C-singlethread' ?>

@@ -1584,7 +1584,8 @@ local cl_kernel_verify = ffi.C.rand()
 
 local kernelsForID = table()
 
-local clcpuGlobalLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
+local clcpuCoreLib 	-- info for the lib holding all the ffi_set_ stuff ... which everyone else will have to link to
+local clcpuCoreMultiLib
 local ffi_setter_for_ctype = {}
 
 local function kernelCastAndVerify(kernelHandle)
@@ -1752,7 +1753,7 @@ local function bindProgramKernels(program)
 			kernel.ffi_atypes = ffi_atypes
 
 			kernel.ffi_rtype = ffi.new('ffi_type*[1]')
-			local lib = assert(clcpuGlobalLib.lib)
+			local lib = assert(clcpuCoreLib.lib)
 			lib['ffi_set_void'](kernel.ffi_rtype)	-- kernel always returns void
 
 			kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
@@ -1826,14 +1827,35 @@ function cl:getBuildEnv()
 	function buildEnv:cleanup() end
 
 	-- while we're here, do this once ... and with C only
-	clcpuGlobalLib = require 'ffi-c.c':build(template(
+	clcpuCoreLib = require 'ffi-c.c':build(template(
 		assert(cl.pathToCLCPU'clcpu-core.c':read()),
 		{
+			cl = cl,
 			ffi_all_types = ffi_all_types,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 			numcores = numcores,
 		}
 	))
+
+	if cl.clcpu_kernelCallMethod == 'C-multithread' then
+		local CPP = require 'ffi-c.cpp'
+		
+		function CPP:addExtraObjFiles(objfiles)
+			objfiles:insert((assert(clcpuCoreLib.libfile)))
+		end
+
+		clcpuCoreMultiLib = CPP:build(template(
+			assert(cl.pathToCLCPU'clcpu-core-multi.cpp':read()),
+			{
+				cl = cl,
+				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
+				numcores = numcores,
+			}
+		))
+			
+		function CPP:addExtraObjFiles(objfiles) end
+	end
+
 
 	ffi.cdef(template([[
 <? for _,f in ipairs(ffi_all_types) do ?>
@@ -1860,9 +1882,36 @@ typedef struct {
 	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} cl_threadinfo_t;
-extern cl_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+} clcpu_private_threadinfo_t;
+extern clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+
+<?
+if cl.clcpu_kernelCallMethod == 'C-singlethread'
+or cl.clcpu_kernelCallMethod == 'C-multithread'
+then
+?>
+
+typedef struct ffi_cif;
+void clcpu_private_execSingleThread(
+	ffi_cif * cif,
+	void (*func)(),
+	void ** values
+);
+<? end ?>
+
+<? if cl.clcpu_kernelCallMethod == 'C-multithread' then ?>
+
+void clcpu_private_execMultiThread(
+	ffi_cif * cif,
+	void (*func)(),
+	void ** values
+);
+
+<? end ?>
+
+
 ]], {
+		cl = cl,
 		ffi_all_types = ffi_all_types,
 		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 		numcores = numcores,
@@ -2125,9 +2174,9 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	local srcpath = cl.pathToCLCPU'clcpu-header-glue.c'
 	local code = table{
 		template(assert(srcpath:read()), {
+			cl = cl,
 			id = id,
 			vectorTypes = vectorTypes,
-			kernelCallMethod = cl.clcpu_kernelCallMethod,
 			numcores = numcores,
 			cl = cl,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
@@ -2195,75 +2244,6 @@ function cl.clCreateProgramWithBinary(ctx, numDevices, devices, lengths, binarie
 end
 
 cl.clcpu_build = 'release'
-
-local function setupCLProgramHeader(id)
-	local headerCode
-	local result, msg = xpcall(function()
-		headerCode = template([[
-
-//everything accessible everywhere goes here
-typedef struct cl_globalinfo_t_<?=id?> {
-	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
-} cl_globalinfo_t_<?=id?>;
-cl_globalinfo_t_<?=id?> clcpu_private_globalinfo;
-
-// everything in the following need to know which core you're on:
-typedef struct cl_threadinfo_t_<?=id?> {
-	size_t global_linear_id;
-	size_t local_linear_id;
-	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
-} cl_threadinfo_t_<?=id?>;
-cl_threadinfo_t_<?=id?> clcpu_private_threadinfo[<?=numcores?>];
-
-
-
-<?
-if kernelCallMethod == 'C-singlethread'
-or kernelCallMethod == 'C-multithread'
-then
-?>
-
-typedef struct ffi_cif;
-
-void _program_<?=id?>_execSingleThread(
-	ffi_cif * cif,
-	void (*func)(),
-	void ** values
-);
-
-<? if kernelCallMethod == 'C-multithread' then ?>
-
-void _program_<?=id?>_execMultiThread(
-	ffi_cif * cif,
-	void (*func)(),
-	void ** values
-);
-
-<? end ?>
-<? end ?>
-
-]], 	{
-			id = id,
-			kernelCallMethod = cl.clcpu_kernelCallMethod,
-			numcores = numcores,
-			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-		})
-		ffi.cdef(headerCode)
-	end, function(err)
-		return err..'\n'
-			..'header code:\n'
-			..require 'template.showcode'(tostring(headerCode))..'\n'
-			..debug.traceback()
-	end)
-	-- rethrow ...
-	if not result then error(msg) end
-end
 
 -- just source -> obj
 --cl_int clCompileProgram(cl_program program, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_headers, const cl_program * input_headers, const char ** header_include_names, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data);
@@ -2465,9 +2445,9 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 			for i=#objfiles,1,-1 do objfiles[i] = nil end
 			
 			-- link against .o file to make the .so ...
-			--objfiles:insert((assert(clcpuGlobalLib.objfile)))
+			--objfiles:insert((assert(clcpuCoreLib.objfile)))
 			-- link against .so file to make the .so ...
-			objfiles:insert((assert(clcpuGlobalLib.libfile)))
+			objfiles:insert((assert(clcpuCoreLib.libfile)))
 			
 			objfiles:append(programs:mapi(function(srcProgram)
 				return (assert(srcProgram.buildCtx.objfile))
@@ -2481,7 +2461,6 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 		-- TODO here, how to build from other builds ...
 		-- by skipping the code / :compile part, and by overriding the :addExtraObjFiles part
 
-		setupCLProgramHeader(id)
 		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
 
 		local kernels = {}
@@ -2593,68 +2572,13 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- called from buildEnv:link stage
 		-- I'm going to change this whether it is clCompileProgram or clBuildProgram or clLinkProgram ...
 		function buildEnv:addExtraObjFiles(objfiles, buildCtx)
-			if cl.clcpu_kernelCallMethod == 'C-multithread' then
-
-				-- TODO replace buildCtx.srcfile's suffix from self.srcSuffix to _multi .. self.srcSuffix
-				local name = self:getBuildDir()..'/'..buildCtx.name..'_multi'
-
-				local pushcompiler = buildCtx.env.compiler
-				local pushcppver = buildCtx.env.cppver
-				buildCtx.env.compiler = 'g++'
-
-				-- TODO this has to be done before postConfig()
-				-- or else it won't get baked into the compileFlags
-				-- or I could just move the amend-to-compile-flags into the build itself? like I do macros etc
-				buildCtx.env.cppver = 'c++20'
-				-- so just do this
-				local pushcflags = buildCtx.env.compileFlags
-				buildCtx.env.compileFlags = buildCtx.env.compileFlags:gsub('std=c11', 'std=c++20')
-
-				-- I could use templates
-				-- I was using templates
-				-- but I need to pass the values through into the included file where the cl-cpu structs are
-				-- and I can't do that with templates (unless I further inline-and-template)
-				-- so instead I'll use macros
-				local nmacros = #buildCtx.env.macros
-				--buildCtx.env.macros:insert('CLCPU_MAXDIM='..clDeviceMaxWorkItemDimension)
-				--buildCtx.env.macros:insert('CLCPU_NUMCORES='..numcores)
-				-- on second thought, I can't use macros in the luajit ffi.cdef
-				-- so for that i'd have to replace stuff anyways
-				-- so meh might as well just use templates
-
-				local srcsrcpath = cl.pathToCLCPU'exec-multi.cpp'
-				local srcfile = name..'.cpp'
-				local objfile = name..buildCtx.env.objSuffix
-
-				-- generate the file from the templated file
-				assert(path(srcfile):write(template(assert(srcsrcpath:read()), {
-					id = buildCtx.currentProgramID,
-					numcores = numcores,
-					clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-				})))
-
-				buildCtx.env.objLogFile = name..'-obj.log'	-- what's this for again?
-				local status, compileLog = buildCtx.env:buildObj(objfile, srcfile)
-				buildCtx.compileLog = buildCtx.compileLog..compileLog
-				if not status then
-					buildCtx.error = "failed to build c code"
-					error'here'	-- throwing away errors?
-					--return buildCtx
-				end
-
-				objfiles:insert(objfile)
-
-				buildCtx.env.macros = buildCtx.env.macros:sub(1, nmacros)
-
-				buildCtx.env.compiler = pushcompiler
-				buildCtx.env.cppver = pushcppver
-				buildCtx.env.compileFlags = pushcflags
-			end
-
 			-- link against .o file to make the .so ...
-			--objfiles:insert((assert(clcpuGlobalLib.objfile)))
+			--objfiles:insert((assert(clcpuCoreLib.objfile)))
 			-- link against .so file to make the .so ...
-			objfiles:insert((assert(clcpuGlobalLib.libfile)))
+			objfiles:insert((assert(clcpuCoreLib.libfile)))
+			if cl.clcpu_kernelCallMethod == 'C-multithread' then
+				objfiles:insert((assert(clcpuCoreMultiLib.libfile)))
+			end
 		end
 
 		-- this does ...
@@ -2674,10 +2598,6 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		})
 		if buildCtx.error then error(buildCtx.error) end
 --print('done compiling program entry', id)
-
-		-- buildEnv:build calls ffi.load
-		-- so these should now be available:
-		setupCLProgramHeader(id)
 
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
@@ -3098,7 +3018,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		num_groups_v[i] = 1
 	end
 --print'assigning globals...'
-	local globalinfo = lib.clcpu_private_globalinfo
+	local globalinfo = clcpuCoreLib.lib.clcpu_private_globalinfo
 	globalinfo.work_dim = workDim
 	for n=0,clDeviceMaxWorkItemDimension-1 do
 		globalinfo.global_size[n] = global_work_size_v[n+1]
@@ -3109,7 +3029,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
 	if cl.clcpu_kernelCallMethod == 'Lua' then
-		local threadinfo = lib.clclpu_private_threadinfo
+		local threadinfo = clcpuCoreLib.lib.clcpu_private_threadinfo
 
 		threadinfo[0].global_linear_id = 0
 		local is = {}
@@ -3144,17 +3064,17 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 			end
 		end
 	elseif cl.clcpu_kernelCallMethod == 'C-singlethread' then
-		lib['_program_'..program.id..'_execSingleThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+		clcpuCoreLib.lib.clcpu_private_execSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	elseif cl.clcpu_kernelCallMethod == 'C-multithread' then
 		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async
 		-- ... but how to forward / pass varargs?
 		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
 		-- also, if each kernel function call needs a different local_id, group_id, and global_id ...
 		-- ... I guess those need to be per-thread variables, so probably need to be replaced with a macro somehow and then stored in arguments of the C function?
-		lib['_program_'..program.id..'_execMultiThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
-		--lib['_program_'..program.id..'_execSingleThread'](kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+		clcpuCoreMultiLib.lib.clcpu_private_execMultiThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+		--clcpuCoreLib.lib.clcpu_private_execSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	else
-		error("unknown kernelCallMethod "..tostring(cl.clcpu_kernelCallMethod))
+		error("unknown clcpu_kernelCallMethod "..tostring(cl.clcpu_kernelCallMethod))
 	end
 --print('clEnqueueNDRangeKernel done')
 	return ffi.C.CL_SUCCESS
