@@ -1835,13 +1835,23 @@ function cl:getBuildEnv()
 		ffi_all_types = ffi_all_types,
 	}))
 
-	ffi.cdef(template([[
-typedef struct ffi_type;
-<? for _,f in ipairs(ffi_all_types) do ?>
-void ffi_set_<?=f[2]?>(ffi_type ** const);
-<? end ?>
+	-- hmm why does the Lua pathway have a proble with `typedef struct ffi_type;` ?
+	ffi.cdef(template([[<?
+if cl.clcpu_kernelCallMethod ~= 'Lua' then
+?>typedef struct ffi_type;
+<?
+end
+for _,f in ipairs(ffi_all_types) do
+	if cl.clcpu_kernelCallMethod ~= 'Lua' then
+?>void ffi_set_<?=f[2]?>(ffi_type ** const);
+<?	else
+?>void ffi_set_<?=f[2]?>(void ** const);
+<?	end
+end
+?>
 ]], {
 		ffi_all_types = ffi_all_types,
+		cl = cl,
 	}))
 
 	for _,f in ipairs(ffi_all_types) do
