@@ -13,12 +13,19 @@ if ffi.os == 'Windows' then
 #define EXPORT __declspec(dllexport)
 #define kernel EXPORT
 
-<? else ?>
-
+<?
+else
+	if cl.useCpp then
+?>
+#define EXPORT
+#define kernel extern "C"
+<?
+	else
+?>
 #define EXPORT
 #define kernel
-
 <?
+	end
 end
 ?>
 
@@ -28,7 +35,7 @@ end
 // "constant" is the name of a variable used in bits/timex.h, so ... you can't do this ...
 // unless you can think of a name to define it as which doubles as both a valid c++ name and is an argument attribute that degenerates to nothing.
 // otherwise ...
-// for clcpp files you will have to insert these #defines after all #includes 
+// for clcpp files you will have to insert these #defines after all #includes
 // (and for headers, #undef them at the end of the file)
 #define constant
 #define global
@@ -219,17 +226,17 @@ static int4 int4_add(int4 a, int4 b) {
 // TODO should include isfinite(x) ? NAN : ...
 #define sign(x)	((x) > 0 ? 1 : ((x) < 0 ? -1 : 0))
 
-<? 
+<?
 if kernelCallMethod == 'C-singlethread'
 or kernelCallMethod == 'C-multithread'
-then 
+then
 ?>
 
 #include <ffi.h>
 
 // TODO maybe put these in their own library or something?
 // they are only used for cl-cpu , so ... how about compiling them into their own .so?
-<? for _,f in ipairs(ffi_all_types) do 
+<? for _,f in ipairs(ffi_all_types) do
 ?>void ffi_<?=id?>_set_<?=f[2]?>(ffi_type ** const t) { t[0] = &ffi_type_<?=f[2]?>; }
 <? end ?>
 
@@ -292,7 +299,7 @@ void _program_<?=id?>_execSingleThread(
 				++threadinfo->local_id[2],
 				++threadinfo->global_id[2],
 				++threadinfo->global_linear_id
-			) {			
+			) {
 				if (threadinfo->local_id[2] == globalinfo->local_size[2]) {
 					threadinfo->local_id[2] = 0;
 					++threadinfo->group_id[2];

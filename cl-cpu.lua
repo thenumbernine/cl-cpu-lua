@@ -1051,13 +1051,13 @@ function cl.clCreateContext(properties, numDevices, devices, notify, userData, e
 	properties = ffi.cast('cl_context_properties*', properties)
 	numDevices = ffi.cast('cl_uint', numDevices)
 	devices = ffi.cast('cl_device_id*', devices)
-	
+
 	errcodeRet = ffi.cast('cl_int*', errcodeRet)
 	local function returnError(err, ret)
 		if errcodeRet ~= nil then errcodeRet[0] = err end
 		return ffi.cast('cl_context', ret)
  	end
-	
+
 	-- if 'properties' is invalid, or if 'properties' is null and no platform could be selected, then return CL_INVALID_PLATFORM
 	-- if any value in 'properties' is not a valid name then return CL_INVALID_VALUE
 	for i=0,tonumber(numDevices)-1 do
@@ -1311,7 +1311,7 @@ function cl.clCreateCommandQueue(ctx, device, properties, errcodeRet)
 	cmds[0].ctx = ctx
 	cmds[0].device = device
 	cmds[0].properties = properties
-	
+
 	return returnError(ffi.C.CL_SUCCESS, cmds)
 end
 
@@ -1823,7 +1823,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	numStrings = ffi.cast('cl_uint', numStrings)
 	stringsPtr = ffi.cast('char**', stringsPtr)
 	lengthsPtr = ffi.cast('size_t*', lengthsPtr)
-	
+
 	errcodeRet = ffi.cast('cl_int*', errcodeRet)
 	local function returnError(err, ret)
 		if errcodeRet ~= nil then errcodeRet[0] = err end
@@ -2709,8 +2709,6 @@ function cl.clCreateKernel(programHandle, kernelName, errcodeRet)
 		return ffi.cast('cl_kernel', ret)
  	end
 
---print(debug.traceback())
-	--programHandle = ffi.cast('cl_program', programHandle)
 	kernelName = ffi.cast('char*', kernelName)
 	if kernelName == nil then
 		return returnError(ffi.C.CL_INVALID_VALUE)
@@ -2724,11 +2722,11 @@ function cl.clCreateKernel(programHandle, kernelName, errcodeRet)
 
 	local program = assert(programsForID[programHandle[0].id])
 	if program.status ~= ffi.C.CL_BUILD_SUCCESS then
---print("program.status is not CL_BUILD_SUCCESS...")
+print("program.status is not CL_BUILD_SUCCESS...")
 		return returnError(ffi.C.CL_INVALID_PROGRAM_EXECUTABLE)
 	end
 	if program.lib == nil then
---print("program.lib is nil")
+print("program.lib is nil")
 		return returnError(ffi.C.CL_INVALID_PROGRAM_EXECUTABLE)
 	end
 
