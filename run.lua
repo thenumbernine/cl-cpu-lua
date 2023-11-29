@@ -18,7 +18,7 @@ local function handleArgs(...)
 		-- TODO how about we just pass args to compiler
 		local inc = assert(select(2, ...), "expected -I <include dirs> (;-separated)")
 		local path = require 'ext.path'
-		args.includeDirs = args.includeDirs or table()
+		args.includeDirs = args.includeDirs or require 'ext.table'()
 		args.includeDirs:insert(path(inc):abs().path)
 		return handleArgs(select(3, ...))
 	end
