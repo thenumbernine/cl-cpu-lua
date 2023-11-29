@@ -59,7 +59,7 @@ using std::max;
 
 //TODO esp in multithreaded implementation
 #define CLK_LOCAL_MEM_FENCE	0
-void barrier(int);
+<?=externC?> void barrier(int);
 
 #define mix(a, b, t) 	((a) * (1. - t) + (b) * t)
 #define rsqrt(x)		(1. / sqrt(x))
