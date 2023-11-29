@@ -1758,7 +1758,7 @@ end
 
 -- PROGRAM
 
-function cl:getBuildEnv()
+function private:getBuildEnv()
 	if private.buildEnv then return private.buildEnv end
 
 	-- while we're here, do this once ... and with C only
@@ -1956,7 +1956,7 @@ typedef void ffi_type;
 	require 'ffi-c.c'.cleanup = function() end
 	require 'ffi-c.cpp'.cleanup = function() end
 
-	--cl:getBuildEnv()
+	--private:getBuildEnv()
 end
 
 
@@ -2207,7 +2207,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 --print('adding program entry', id)
 
 	-- this will initialize clcpu_h
-	cl:getBuildEnv()
+	private:getBuildEnv()
 
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
 	local srcpath = private.pathToCLCPU'clcpu-header-glue.c'
@@ -2355,7 +2355,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 			code = assert(program.code, "couldn't find program.code"),
 			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
 		}
-		local buildEnv = cl:getBuildEnv()
+		local buildEnv = private:getBuildEnv()
 		buildEnv:setup(args, buildCtx)
 		if buildCtx.error then error(buildCtx.error) end
 		buildEnv:compile(args, buildCtx)
@@ -2478,7 +2478,7 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 
 	local headerCode
 	xpcall(function()
-		local buildEnv = cl:getBuildEnv()
+		local buildEnv = private:getBuildEnv()
 		local buildCtx = {}
 		local args = {}
 		buildEnv:setup(args, buildCtx)
@@ -2611,7 +2611,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	program.options = nil
 
 	xpcall(function()
-		local buildEnv = cl:getBuildEnv()
+		local buildEnv = private:getBuildEnv()
 
 		-- called from buildEnv:link stage
 		-- I'm going to change this whether it is clCompileProgram or clBuildProgram or clLinkProgram ...
