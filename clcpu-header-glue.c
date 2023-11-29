@@ -2,6 +2,9 @@
 // to make them more C like
 // and includes the FFI stuff for the C-singlethread implementation
 
+<?
+local externC = cl.useCpp and 'extern "C"' or ""
+?>
 
 <?
 local ffi = require 'ffi'
@@ -10,19 +13,13 @@ if ffi.os == 'Windows' then
 #define __attribute__(x)
 
 //I hate Windows
-#define kernel __declspec(dllexport)
+#define kernel <?=externC?> __declspec(dllexport)
 
 <?
 else
-	if cl.useCpp then
 ?>
-#define kernel extern "C"
+#define kernel <?=externC?>
 <?
-	else
-?>
-#define kernel
-<?
-	end
 end
 ?>
 
@@ -145,18 +142,18 @@ typedef union {
 
 <? end -- cl.useCpp ?>
 
-uint get_work_dim();
-size_t get_global_size(int n);
-size_t get_local_size(int n);
-size_t get_enqueued_local_size(int n);
-size_t get_num_groups(int n);
-size_t get_global_offset(int n);
+<?=externC?> uint get_work_dim();
+<?=externC?> size_t get_global_size(int n);
+<?=externC?> size_t get_local_size(int n);
+<?=externC?> size_t get_enqueued_local_size(int n);
+<?=externC?> size_t get_num_groups(int n);
+<?=externC?> size_t get_global_offset(int n);
 
-size_t get_global_linear_id();
-size_t get_local_linear_id();
-size_t get_global_id(int n);
-size_t get_local_id(int n);
-size_t get_group_id(int n);
+<?=externC?> size_t get_global_linear_id();
+<?=externC?> size_t get_local_linear_id();
+<?=externC?> size_t get_global_id(int n);
+<?=externC?> size_t get_local_id(int n);
+<?=externC?> size_t get_group_id(int n);
 
 
 <? if cl.useCpp then ?>

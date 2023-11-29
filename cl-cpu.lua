@@ -1753,8 +1753,7 @@ local function bindProgramKernels(program)
 			kernel.ffi_atypes = ffi_atypes
 
 			kernel.ffi_rtype = ffi.new('ffi_type*[1]')
-			local lib = assert(clcpuCoreLib.lib)
-			lib['ffi_set_void'](kernel.ffi_rtype)	-- kernel always returns void
+			clcpuCoreLib.lib.ffi_set_void(kernel.ffi_rtype)	-- kernel always returns void
 
 			kernel.ffi_values = ffi.new('void*[?]', kernel.numargs)
 			kernel.ffi_ptrs = ffi.new('void*[?]', kernel.numargs)
@@ -1764,9 +1763,9 @@ local function bindProgramKernels(program)
 				if argInfo.isGlobal
 				or argInfo.isConstant
 				then
-					lib['ffi_set_pointer'](ffi_atypes+i-1)
+					clcpuCoreLib.lib.ffi_set_pointer(ffi_atypes+i-1)
 				elseif argInfo.isLocal then
-					lib['ffi_set_pointer'](ffi_atypes+i-1)
+					clcpuCoreLib.lib.ffi_set_pointer(ffi_atypes+i-1)
 				else
 					-- TODO how to detect the type of the arg?
 					-- all the CL API cares about is the sizeof
@@ -1782,7 +1781,7 @@ local function bindProgramKernels(program)
 						-- TODO how to report this error
 						error("couldn't find setter for type "..k)
 					else
-						lib[settername](ffi_atypes+i-1)
+						clcpuCoreLib.lib[settername](ffi_atypes+i-1)
 					end
 				end
 			end
@@ -1837,7 +1836,7 @@ function cl:getBuildEnv()
 
 	if cl.clcpu_kernelCallMethod == 'C-multithread' then
 		local CPP = require 'ffi-c.cpp'
-		
+
 		function CPP:addExtraObjFiles(objfiles)
 			objfiles:insert((assert(clcpuCoreLib.libfile)))
 		end
@@ -1855,7 +1854,7 @@ function cl:getBuildEnv()
 				}),
 			}
 		))
-			
+
 		function CPP:addExtraObjFiles(objfiles) end
 	end
 
@@ -2197,7 +2196,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 			numcores = numcores,
 			cl = cl,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-		
+
 			clcpu_h = template(clcpu_h, {
 				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 				numcores = numcores,
@@ -2468,15 +2467,16 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 		-- ... don't compile ...
 		function buildEnv:addExtraObjFiles(objfiles)
 			for i=#objfiles,1,-1 do objfiles[i] = nil end
-			
+
+			objfiles:append(programs:mapi(function(srcProgram)
+				return (assert(srcProgram.buildCtx.objfile))
+			end))
+
+			-- put this last so the objs before it can use it
 			-- link against .o file to make the .so ...
 			--objfiles:insert((assert(clcpuCoreLib.objfile)))
 			-- link against .so file to make the .so ...
 			objfiles:insert((assert(clcpuCoreLib.libfile)))
-			
-			objfiles:append(programs:mapi(function(srcProgram)
-				return (assert(srcProgram.buildCtx.objfile))
-			end))
 		end
 		buildEnv:link(args, buildCtx)
 		if buildCtx.error then error(buildCtx.error) end
@@ -2597,13 +2597,15 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- called from buildEnv:link stage
 		-- I'm going to change this whether it is clCompileProgram or clBuildProgram or clLinkProgram ...
 		function buildEnv:addExtraObjFiles(objfiles, buildCtx)
+			if cl.clcpu_kernelCallMethod == 'C-multithread' then
+				objfiles:insert((assert(clcpuCoreMultiLib.libfile)))
+			end
+
+			-- put this last so the objs before it can use it
 			-- link against .o file to make the .so ...
 			--objfiles:insert((assert(clcpuCoreLib.objfile)))
 			-- link against .so file to make the .so ...
 			objfiles:insert((assert(clcpuCoreLib.libfile)))
-			if cl.clcpu_kernelCallMethod == 'C-multithread' then
-				objfiles:insert((assert(clcpuCoreMultiLib.libfile)))
-			end
 		end
 
 		-- this does ...
