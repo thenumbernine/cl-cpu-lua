@@ -1692,6 +1692,7 @@ local function bindProgramKernels(program)
 			kernel.func = program.lib[kernelName]
 	--print('func', kernel.func)
 		end, function(err)
+			io.stderr:write('bindProgramKernels:\n')
 			print('error while compiling: '..err)
 			print(debug.traceback())
 		end) then
@@ -2345,8 +2346,8 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 	program.options = nil
 	program.kernel = {}
 
+	local buildCtx = {}
 	xpcall(function()
-		local buildCtx = {}
 		buildCtx.currentProgramID = program.id	-- used by buildEnv:link
 		buildCtx.include = private.extraIncludeDirs
 		buildCtx.cppver = private.useCpp and 'c++20' or nil
@@ -2376,9 +2377,15 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		-- this is still in the temp file so ...
 		--io.stderr:write('code:', '\n')
 		--io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
+		io.stderr:write('clCompileProgram:\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
+		if buildCtx then
+			-- TODO getLog will still fail based on other things ...
+			program.compileLog = buildCtx.compileLog
+			program.linkLog = buildCtx.linkLog
+		end
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
@@ -2482,9 +2489,10 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 	local err = ffi.C.CL_SUCCESS
 
 	local headerCode
+	local buildCtx
 	xpcall(function()
 		local buildEnv = private:getBuildEnv()
-		local buildCtx = {}
+		buildCtx = {}
 		local args = {}
 		buildEnv:setup(args, buildCtx)
 		if buildCtx.error then error(buildCtx.error) end
@@ -2551,9 +2559,14 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 
 		bindProgramKernels(program)
 	end, function(err)
+		io.stderr:write('clLinkProgram:\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
+		if buildCtx then
+			program.compileLog = buildCtx.compileLog
+			program.linkLog = buildCtx.linkLog
+		end
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
@@ -2615,6 +2628,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	program.status = ffi.C.CL_BUILD_IN_PROGRESS
 	program.options = nil
 
+	local buildCtx
 	xpcall(function()
 		local buildEnv = private:getBuildEnv()
 
@@ -2638,7 +2652,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- :link - .o file -> .so file
 		-- :load - loads the .so file
 		-- so if we split this up into clBuild and clLink, we will have to track the context file between these calls
-		local buildCtx = buildEnv:build({
+		buildCtx = buildEnv:build({
 			code = program.code,
 			build = cl.clcpu_build,	-- debug vs release, corresponding compiler flags are in lua-make
 		}, {
@@ -2671,9 +2685,14 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- this is still in the temp file so ...
 		--io.stderr:write('code:', '\n')
 		--io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
+		io.stderr:write('clBuildProgram:\n')
 		io.stderr:write('error while compiling: '..tostring(err), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
+		if buildCtx then
+			program.compileLog = buildCtx.compileLog
+			program.linkLog = buildCtx.linkLog
+		end
 		err = ffi.C.CL_BUILD_PROGRAM_FAILURE
 		program.status = ffi.C.CL_BUILD_ERROR
 	end)
