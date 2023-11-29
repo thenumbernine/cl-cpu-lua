@@ -23,14 +23,23 @@ local extraStrictVerification = true
 cl.clcpu_kernelCallMethod = 'C-multithread'
 
 
-if cl.clcpu_kernelCallMethod == 'C-singlethread'
-or cl.clcpu_kernelCallMethod == 'C-multithread'
-then
-	require 'ffi.req' 'libffi'	-- this is lib-ffi, not luajit-ffi
-else
-	ffi.cdef[[
+--[[
+args:
+	kernelCallMethod = override default kernel call method
+--]]
+function cl:clcpu_initialize(args)
+	args = args or {}
+	cl.clcpu_kernelCallMethod = args.kernelCallMethod or cl.clcpu_kernelCallMethod
+
+	if cl.clcpu_kernelCallMethod == 'C-singlethread'
+	or cl.clcpu_kernelCallMethod == 'C-multithread'
+	then
+		require 'ffi.req' 'libffi'	-- this is lib-ffi, not luajit-ffi
+	else
+		ffi.cdef[[
 typedef void ffi_type;
 ]]
+	end
 end
 
 local ffi_all_types = table{

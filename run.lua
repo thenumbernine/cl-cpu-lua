@@ -19,7 +19,9 @@ local function run(...)
 		clcpu.extraInclude:insert(path(inc):abs().path)
 		return run(select(3, ...))
 	end
+
 	-- else ...
+	clcpu:clcpu_initialize()
 	loadfile(x)(select(2, ...))
 end
 
