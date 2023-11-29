@@ -21,6 +21,9 @@ local function handleArgs(...)
 		args.includeDirs = args.includeDirs or require 'ext.table'()
 		args.includeDirs:insert(path(inc):abs().path)
 		return handleArgs(select(3, ...))
+	elseif x == '-kernelCallMethod' then
+		args.kernelCallMethod = select(2, ...)
+		return handleArgs(select(3, ...))
 	end
 
 	-- else run ...

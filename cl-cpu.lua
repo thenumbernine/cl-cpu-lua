@@ -1909,12 +1909,17 @@ args:
 	extraStrictVerification = (optional) default true
 	numcores = (optional) default = hardware concurrency for C-multithread, 1 for anything else
 	includeDirs = (optional) extra dirs for include path
+	useCpp = (optional) flag to set this to use C++ by default (instead of C)
 --]]
 function private:initialize(args)
 	args = args or {}
-	
+
 	private.kernelCallMethod = args.kernelCallMethod or private.kernelCallMethod
 
+	-- boolean values, so don't use 'or' to override
+	if args.useCpp ~= nil then
+		private.useCpp = args.useCpp
+	end
 	if args.extraStrictVerification ~= nil then
 		private.extraStrictVerification = args.extraStrictVerification
 	end
