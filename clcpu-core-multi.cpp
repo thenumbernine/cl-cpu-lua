@@ -48,19 +48,19 @@ extern "C" void clcpu_private_execMultiThread(
 
 	static std::vector<size_t> cpuids;
 	std::iota(cpuids.begin(), cpuids.end(), 0);
-	std::vector<std::future<bool>> handles(<?=numcores?>);
+	std::vector<std::future<bool>> handles(<?=cl.private.numcores?>);
 
 	size_t size = globalinfo->global_size[0]
 		* globalinfo->global_size[1]
 		* globalinfo->global_size[2];
 
-	for (size_t coreid = 0; coreid < <?=numcores?>; ++coreid) {
+	for (size_t coreid = 0; coreid < <?=cl.private.numcores?>; ++coreid) {
 		handles[coreid] = std::async(std::launch::async,
 			[size, globalinfo, cif, func, values](size_t coreid) -> bool {
 				clcpu_private_threadIndexForID = coreid;
 				clcpu_private_threadinfo_t * threadinfo = clcpu_private_threadinfo + coreid;
-				size_t ibegin = size * coreid / <?=numcores?>;
-				size_t iend = size * (coreid+1) / <?=numcores?>;
+				size_t ibegin = size * coreid / <?=cl.private.numcores?>;
+				size_t iend = size * (coreid+1) / <?=cl.private.numcores?>;
 				for (size_t i = ibegin; i < iend; ++i) {
 					threadinfo->global_linear_id = i;
 				

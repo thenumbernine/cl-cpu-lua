@@ -7,40 +7,21 @@ local template = require 'template'
 
 require 'ffi.req' 'c.stdlib'	-- rand()
 
-
-
+-- the global namespace object
 local cl = {}
 
--- this is written in cl-cpu/run.lua immediately after loading cl-cpu/cl-cpu.lua
-cl.pathToCLCPU = path'.'
+-- private stuff for clcpu alone
+-- not sure where I should hide this ...
+local private = {}
+cl.private = private
 
 -- whether to verify each pointer passed into a function was an object we created
-local extraStrictVerification = true
+private.extraStrictVerification = true
 
+--private.kernelCallMethod = 'Lua'				-- fps 3
+--private.kernelCallMethod = 'C-singlethread'		-- fps 15
+private.kernelCallMethod = 'C-multithread'
 
---cl.clcpu_kernelCallMethod = 'Lua'				-- fps 3
---cl.clcpu_kernelCallMethod = 'C-singlethread'		-- fps 15
-cl.clcpu_kernelCallMethod = 'C-multithread'
-
-
---[[
-args:
-	kernelCallMethod = override default kernel call method
---]]
-function cl:clcpu_initialize(args)
-	args = args or {}
-	cl.clcpu_kernelCallMethod = args.kernelCallMethod or cl.clcpu_kernelCallMethod
-
-	if cl.clcpu_kernelCallMethod == 'C-singlethread'
-	or cl.clcpu_kernelCallMethod == 'C-multithread'
-	then
-		require 'ffi.req' 'libffi'	-- this is lib-ffi, not luajit-ffi
-	else
-		ffi.cdef[[
-typedef void ffi_type;
-]]
-	end
-end
 
 local ffi_all_types = table{
 --[[ these are typedef'd to others
@@ -70,15 +51,6 @@ local ffi_all_types = table{
 	{'void', 'void'},
 	{'void*', 'pointer'},
 }
-
-local numcores = 1
-if cl.clcpu_kernelCallMethod == 'C-multithread' then
-	-- TODO get numcores from hardware_concurrency
-	require 'ffi.req' 'c.sys.sysinfo'
-	numcores = tonumber(ffi.C.get_nprocs())
-	print('using '..numcores..' cores')
-end
-
 
 -- copied from ffi/OpenCL.lua
 ffi.cdef[[
@@ -1105,7 +1077,7 @@ local function memCastAndVerify(mem)
 	then
 		return nil, ffi.C.CL_INVALID_MEM_OBJECT
 	end
-	if extraStrictVerification then
+	if private.extraStrictVerification then
 		local i
 		for j,omem in ipairs(allMems) do
 			if ffi.cast('struct _cl_mem*', omem) == mem then
@@ -1755,8 +1727,8 @@ local function bindProgramKernels(program)
 		end
 
 		-- if we're using C+FFI then setup the CIF here
-		if cl.clcpu_kernelCallMethod == 'C-singlethread'
-		or cl.clcpu_kernelCallMethod == 'C-multithread'
+		if private.kernelCallMethod == 'C-singlethread'
+		or private.kernelCallMethod == 'C-multithread'
 		then
 			local ffi_atypes = ffi.new('ffi_type*[?]', kernel.numargs)
 			kernel.ffi_atypes = ffi_atypes
@@ -1820,30 +1792,22 @@ local clcpu_h
 function cl:getBuildEnv()
 	if buildEnv then return buildEnv end
 
-	-- don't clean up files upon gc
-	-- because this is deleting libraries that i'm trying to debug ...
-	require 'ffi-c.c'.cleanup = function() end
-	require 'ffi-c.cpp'.cleanup = function() end
-
-	clcpu_h = assert(cl.pathToCLCPU'cl-cpu.h':read())
-
 	-- while we're here, do this once ... and with C only
 	clcpuCoreLib = require 'ffi-c.c':build(template(
-		assert(cl.pathToCLCPU'clcpu-core.c':read()),
+		assert(private.pathToCLCPU'clcpu-core.c':read()),
 		{
 			cl = cl,
 			ffi_all_types = ffi_all_types,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-			numcores = numcores,
 			clcpu_h = template(clcpu_h, {
+				cl = cl,
 				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-				numcores = numcores,
 				extern = "",	-- declared here, so not extern
 			}),
 		}
 	))
 
-	if cl.clcpu_kernelCallMethod == 'C-multithread' then
+	if private.kernelCallMethod == 'C-multithread' then
 		local CPP = require 'ffi-c.cpp'
 
 		function CPP:addExtraObjFiles(objfiles)
@@ -1851,14 +1815,13 @@ function cl:getBuildEnv()
 		end
 
 		clcpuCoreMultiLib = CPP:build(template(
-			assert(cl.pathToCLCPU'clcpu-core-multi.cpp':read()),
+			assert(private.pathToCLCPU'clcpu-core-multi.cpp':read()),
 			{
 				cl = cl,
 				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-				numcores = numcores,
 				clcpu_h = template(clcpu_h, {
+					cl = cl,
 					clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-					numcores = numcores,
 					extern = 'extern "C"',	-- c++, so needs extern "C"
 				}),
 			}
@@ -1894,11 +1857,11 @@ typedef struct {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } clcpu_private_threadinfo_t;
-extern clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+extern clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=cl.private.numcores?>];
 
 <?
-if cl.clcpu_kernelCallMethod == 'C-singlethread'
-or cl.clcpu_kernelCallMethod == 'C-multithread'
+if cl.private.kernelCallMethod == 'C-singlethread'
+or cl.private.kernelCallMethod == 'C-multithread'
 then
 ?>
 
@@ -1910,7 +1873,7 @@ void clcpu_private_execSingleThread(
 );
 <? end ?>
 
-<? if cl.clcpu_kernelCallMethod == 'C-multithread' then ?>
+<? if cl.private.kernelCallMethod == 'C-multithread' then ?>
 
 void clcpu_private_execMultiThread(
 	ffi_cif * cif,
@@ -1925,7 +1888,6 @@ void clcpu_private_execMultiThread(
 		cl = cl,
 		ffi_all_types = ffi_all_types,
 		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-		numcores = numcores,
 	}))
 
 	for _,f in ipairs(ffi_all_types) do
@@ -1946,6 +1908,59 @@ void clcpu_private_execMultiThread(
 
 	return buildEnv
 end
+
+--[[
+args:
+	pathToCLCPU = where to find the clcpu files
+	kernelCallMethod = (optional) override default kernel call method
+	extraStrictVerification = (optional) default true
+	numcores = (optional) default = hardware concurrency for C-multithread, 1 for anything else
+--]]
+function private:initialize(args)
+	args = args or {}
+	
+	private.kernelCallMethod = args.kernelCallMethod or private.kernelCallMethod
+
+	if args.extraStrictVerification ~= nil then
+		private.extraStrictVerification = args.extraStrictVerification
+	end
+
+	-- this is written in cl-cpu/run.lua immediately after loading cl-cpu/cl-cpu.lua
+	private.pathToCLCPU = args.pathToCLCPU or path'.'
+
+	if private.kernelCallMethod == 'C-singlethread'
+	or private.kernelCallMethod == 'C-multithread'
+	then
+		require 'ffi.req' 'libffi'	-- this is lib-ffi, not luajit-ffi
+	else
+		ffi.cdef[[
+typedef void ffi_type;
+]]
+	end
+
+	private.numcores = 1
+	if args.numcores ~= nil then
+		private.numcores = args.numcores
+	else
+		if private.kernelCallMethod == 'C-multithread' then
+			-- TODO get numcores from hardware_concurrency
+			require 'ffi.req' 'c.sys.sysinfo'
+			private.numcores = tonumber(ffi.C.get_nprocs())
+			print('using '..private.numcores..' cores')
+		end
+	end
+
+	clcpu_h = assert(private.pathToCLCPU'cl-cpu.h':read())
+
+	-- don't clean up files upon gc
+	-- because this is deleting libraries that i'm trying to debug ...
+	require 'ffi-c.c'.cleanup = function() end
+	require 'ffi-c.cpp'.cleanup = function() end
+
+	--cl:getBuildEnv()
+end
+
+
 
 --]]
 --[[ so this is a more flexible version ...
@@ -2196,19 +2211,17 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	cl:getBuildEnv()
 
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
-	local srcpath = cl.pathToCLCPU'clcpu-header-glue.c'
+	local srcpath = private.pathToCLCPU'clcpu-header-glue.c'
 	local code = table{
 		template(assert(srcpath:read()), {
 			cl = cl,
 			id = id,
 			vectorTypes = vectorTypes,
-			numcores = numcores,
-			cl = cl,
 			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 
 			clcpu_h = template(clcpu_h, {
+				cl = cl,
 				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
-				numcores = numcores,
 				extern = ffi.os == 'Windows'
 					and '__declspec(dllexport) extern'
 					or 'extern',
@@ -2606,7 +2619,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		-- called from buildEnv:link stage
 		-- I'm going to change this whether it is clCompileProgram or clBuildProgram or clLinkProgram ...
 		function buildEnv:addExtraObjFiles(objfiles, buildCtx)
-			if cl.clcpu_kernelCallMethod == 'C-multithread' then
+			if private.kernelCallMethod == 'C-multithread' then
 				objfiles:insert((assert(clcpuCoreMultiLib.libfile)))
 			end
 
@@ -2917,9 +2930,9 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 	local srcargs = kernel.args
 	local argInfos = kernel.argInfos
 
-	-- used with cl.clcpu_kernelCallMethod == 'Lua'
+	-- used with private.kernelCallMethod == 'Lua'
 	local dstargs
-	if cl.clcpu_kernelCallMethod == 'Lua' then
+	if private.kernelCallMethod == 'Lua' then
 		dstargs = {}
 		for i=1,kernel.numargs do
 			local argInfo = assert(argInfos[i])
@@ -2974,10 +2987,10 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 	--print('arg value', arg)
 			dstargs[i] = arg
 		end
-	elseif cl.clcpu_kernelCallMethod == 'C-singlethread'
-	or cl.clcpu_kernelCallMethod == 'C-multithread'
+	elseif private.kernelCallMethod == 'C-singlethread'
+	or private.kernelCallMethod == 'C-multithread'
 	then
-		-- used with cl.clcpu_kernelCallMethod == 'C-singlethread' or 'C-multithread'
+		-- used with private.kernelCallMethod == 'C-singlethread' or 'C-multithread'
 		-- since most often values has to point to a pointer
 		-- reset all values before assigning from what the user provided
 		-- TODO this could be skipped if value-setting was all done in clSetKernelArg
@@ -3064,7 +3077,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 	end
 --print'...globals assigning'
 	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
-	if cl.clcpu_kernelCallMethod == 'Lua' then
+	if private.kernelCallMethod == 'Lua' then
 		local threadinfo = clcpuCoreLib.lib.clcpu_private_threadinfo
 
 		threadinfo[0].global_linear_id = 0
@@ -3099,9 +3112,9 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 				end
 			end
 		end
-	elseif cl.clcpu_kernelCallMethod == 'C-singlethread' then
+	elseif private.kernelCallMethod == 'C-singlethread' then
 		clcpuCoreLib.lib.clcpu_private_execSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
-	elseif cl.clcpu_kernelCallMethod == 'C-multithread' then
+	elseif private.kernelCallMethod == 'C-multithread' then
 		-- multithreaded luajit?  j/k, send to to a C wrapper of std::async
 		-- ... but how to forward / pass varargs?
 		-- maybe I should be buffering all arg values in clSetKernelArg, and removing the args from the function call in clEnqueueNDRangeKernel
@@ -3110,7 +3123,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		clcpuCoreMultiLib.lib.clcpu_private_execMultiThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 		--clcpuCoreLib.lib.clcpu_private_execSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 	else
-		error("unknown clcpu_kernelCallMethod "..tostring(cl.clcpu_kernelCallMethod))
+		error("unknown kernelCallMethod "..tostring(private.kernelCallMethod))
 	end
 --print('clEnqueueNDRangeKernel done')
 	return ffi.C.CL_SUCCESS

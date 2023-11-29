@@ -49,7 +49,7 @@ size_t get_global_offset(int n) {
 void barrier(int) {}
 
 <?
-if cl.clcpu_kernelCallMethod == 'C-multithread' then
+if cl.private.kernelCallMethod == 'C-multithread' then
 ?>
 // defined in clcpu-core-multi.cpp
 size_t clcpu_private_currentthreadindex();
@@ -79,8 +79,8 @@ size_t get_group_id(int n) {
 
 
 <?
-if cl.clcpu_kernelCallMethod == 'C-singlethread'
-or cl.clcpu_kernelCallMethod == 'C-multithread'
+if cl.private.kernelCallMethod == 'C-singlethread'
+or cl.private.kernelCallMethod == 'C-multithread'
 then
 ?>
 
@@ -166,4 +166,4 @@ void clcpu_private_execSingleThread(
 	}
 }
 
-<? end -- cl.clcpu_kernelCallMethod == 'C-singlethread' ?>
+<? end -- cl.private.kernelCallMethod == 'C-singlethread' ?>

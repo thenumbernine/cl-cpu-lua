@@ -26,4 +26,4 @@ typedef struct {
 	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
 	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
 } clcpu_private_threadinfo_t;
-<?=extern?> clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=numcores?>];
+<?=extern?> clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=cl.private.numcores?>];
