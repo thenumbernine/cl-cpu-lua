@@ -171,6 +171,14 @@ inline int4 operator*(int4 const & a, int const b) {
 	return int4{a.x * b, a.y * b, a.z * b, a.w * b};
 }
 
+
+//TODO just forward-declare ostream? or even template int4's operator<< ?
+#include <iostream>
+
+inline std::ostream& operator<<(std::ostream & o, int4 const & a) {
+	return o << "(" << a.x << ", " << a.y << ", " << a.z << ", " << a.w << ")";
+}
+
 <? else -- cl.private.useCpp ?>
 
 static int4 int4_add(int4 a, int4 b) {
