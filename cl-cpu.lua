@@ -1691,9 +1691,9 @@ local function bindProgramKernels(program)
 		if not xpcall(function()
 			kernel.func = program.lib[kernelName]
 	--print('func', kernel.func)
-		end, function(err)
+		end, function(luaerr)
 			io.stderr:write('bindProgramKernels:\n')
-			print('error while compiling: '..err)
+			print('error while compiling: '..tostring(luaerr))
 			print(debug.traceback())
 		end) then
 			-- an error in reading program.lib[kernelName] is most likely absence of the function in the library
@@ -2373,15 +2373,15 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		program.buildCtx = buildCtx
 
 		findProgramKernelsFromCode(program)
-	end, function(err)
+	end, function(luaerr)
 		-- this is still in the temp file so ...
 		--io.stderr:write('code:', '\n')
 		--io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
 		io.stderr:write('clCompileProgram:\n')
-		io.stderr:write('error while compiling: '..tostring(err), '\n')
+		io.stderr:write('error while compiling: '..tostring(luaerr), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
-		if buildCtx then
+		if program and buildCtx then
 			-- TODO getLog will still fail based on other things ...
 			program.compileLog = buildCtx.compileLog
 			program.linkLog = buildCtx.linkLog
@@ -2558,9 +2558,9 @@ print("tried to link program but source program "..tostring(program.srcfile).." 
 		program.kernels = kernels
 
 		bindProgramKernels(program)
-	end, function(err)
+	end, function(luaerr)
 		io.stderr:write('clLinkProgram:\n')
-		io.stderr:write('error while compiling: '..tostring(err), '\n')
+		io.stderr:write('error while compiling: ', tostring(luaerr), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
 		if buildCtx then
@@ -2681,12 +2681,12 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		findProgramKernelsFromCode(program)
 		bindProgramKernels(program)
 
-	end, function(err)
+	end, function(luaerr)
 		-- this is still in the temp file so ...
 		--io.stderr:write('code:', '\n')
 		--io.stderr:write(require 'template.showcode'(tostring(program.code)), '\n')
 		io.stderr:write('clBuildProgram:\n')
-		io.stderr:write('error while compiling: '..tostring(err), '\n')
+		io.stderr:write('error while compiling: ', tostring(luaerr), '\n')
 		io.stderr:write(debug.traceback(), '\n')
 		io.stderr:flush()
 		if buildCtx then
