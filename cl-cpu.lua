@@ -1758,18 +1758,15 @@ end
 
 -- PROGRAM
 
-cl.extraInclude = table()
-local buildEnv
-local clcpu_h
 function cl:getBuildEnv()
-	if buildEnv then return buildEnv end
+	if private.buildEnv then return private.buildEnv end
 
 	-- while we're here, do this once ... and with C only
 	clcpuCoreLib = require 'ffi-c.c':build(template(
 		assert(private.pathToCLCPU'clcpu-core.c':read()),
 		{
 			cl = cl,
-			clcpu_h = template(clcpu_h, {
+			clcpu_h = template(private.clcpu_h, {
 				cl = cl,
 				extern = "",	-- declared here, so not extern
 			}),
@@ -1787,7 +1784,7 @@ function cl:getBuildEnv()
 			assert(private.pathToCLCPU'clcpu-core-multi.cpp':read()),
 			{
 				cl = cl,
-				clcpu_h = template(clcpu_h, {
+				clcpu_h = template(private.clcpu_h, {
 					cl = cl,
 					extern = 'extern "C"',	-- c++, so needs extern "C"
 				}),
@@ -1865,13 +1862,13 @@ void clcpu_private_execMultiThread(
 	-- [[
 	if private.useCpp then
 		-- c++ fails on field initialization
-		buildEnv = require 'ffi-c.cpp'
+		private.buildEnv = require 'ffi-c.cpp'
 	else
 		-- c fails on arith ops for vector types
-		buildEnv = require 'ffi-c.c'
+		private.buildEnv = require 'ffi-c.c'
 	end
 
-	return buildEnv
+	return private.buildEnv
 end
 
 private.ffi_all_types = table{
@@ -1903,6 +1900,7 @@ private.ffi_all_types = table{
 	{'void*', 'pointer'},
 }
 
+private.extraIncludeDirs = table()
 
 --[[
 args:
@@ -1910,6 +1908,7 @@ args:
 	kernelCallMethod = (optional) override default kernel call method
 	extraStrictVerification = (optional) default true
 	numcores = (optional) default = hardware concurrency for C-multithread, 1 for anything else
+	includeDirs = (optional) extra dirs for include path
 --]]
 function private:initialize(args)
 	args = args or {}
@@ -1918,6 +1917,10 @@ function private:initialize(args)
 
 	if args.extraStrictVerification ~= nil then
 		private.extraStrictVerification = args.extraStrictVerification
+	end
+
+	if args.includeDirs then
+		private.extraIncludeDirs:append(args.includeDirs)
 	end
 
 	-- this is written in cl-cpu/run.lua immediately after loading cl-cpu/cl-cpu.lua
@@ -1946,8 +1949,7 @@ typedef void ffi_type;
 	end
 
 
-
-	clcpu_h = assert(private.pathToCLCPU'cl-cpu.h':read())
+	private.clcpu_h = assert(private.pathToCLCPU'cl-cpu.h':read())
 
 	-- don't clean up files upon gc
 	-- because this is deleting libraries that i'm trying to debug ...
@@ -2215,7 +2217,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 			id = id,
 			vectorTypes = vectorTypes,
 
-			clcpu_h = template(clcpu_h, {
+			clcpu_h = template(private.clcpu_h, {
 				cl = cl,
 				extern = ffi.os == 'Windows'
 					and '__declspec(dllexport) extern'
@@ -2341,7 +2343,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 	xpcall(function()
 		local buildCtx = {}
 		buildCtx.currentProgramID = program.id	-- used by buildEnv:link
-		buildCtx.include = cl.extraInclude
+		buildCtx.include = private.extraIncludeDirs
 		buildCtx.cppver = private.useCpp and 'c++20' or nil
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
@@ -2637,7 +2639,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 		}, {
 			-- used by buildEnv:link
 			currentProgramID = program.id,
-			include = cl.extraInclude,
+			include = private.extraIncludeDirs,
 			cppver = private.useCpp and 'c++20' or nil,
 		})
 		if buildCtx.error then error(buildCtx.error) end
