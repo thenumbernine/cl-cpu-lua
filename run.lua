@@ -4,13 +4,15 @@ local execfn = arg[0]
 
 require 'cl-cpu.setup'
 local clcpu = require 'ffi.req' 'OpenCL'
-local pathToCLCPU = require 'ext.path'(execfn):getdir():abs()
+
+local args = {}
+args.pathToCLCPU = require 'ext.path'(execfn):getdir():abs()
 
 local function handleArgs(...)
 	local x = ...
 	-- handle any args?
 	if x == "-cpp" then
-		clcpu.useCpp = true
+		args.useCpp = true
 		return handleArgs(select(2, ...))
 	elseif x == '-I' then
 		-- TODO how about we just pass args to compiler
@@ -21,9 +23,7 @@ local function handleArgs(...)
 	end
 
 	-- else run ...
-	clcpu.private:initialize{
-		pathToCLCPU = pathToCLCPU,
-	}
+	clcpu.private:initialize(args)
 	loadfile(x)(select(2, ...))
 end
 

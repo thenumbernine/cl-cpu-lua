@@ -64,7 +64,7 @@ extern "C" void clcpu_private_execMultiThread(
 				for (size_t i = ibegin; i < iend; ++i) {
 					threadinfo->global_linear_id = i;
 				
-					size_t is[<?=clDeviceMaxWorkItemDimension?>];
+					size_t is[<?=cl.private.deviceMaxWorkItemDim?>];
 					size_t rest = i;
 					is[0] = rest % globalinfo->global_size[0];
 					rest -= is[0];

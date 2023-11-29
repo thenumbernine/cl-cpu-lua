@@ -3,7 +3,7 @@
 // and includes the FFI stuff for the C-singlethread implementation
 
 <?
-local externC = cl.useCpp and 'extern "C"' or ""
+local externC = cl.private.useCpp and 'extern "C"' or ""
 ?>
 
 <?
@@ -24,7 +24,7 @@ end
 ?>
 
 
-<? if not cl.useCpp then ?>
+<? if not cl.private.useCpp then ?>
 
 // "constant" is the name of a variable used in bits/timex.h, so ... you can't do this ...
 // unless you can think of a name to define it as which doubles as both a valid c++ name and is an argument attribute that degenerates to nothing.
@@ -44,7 +44,7 @@ typedef char bool;
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #define clamp(x,_min,_max)	min(_max,max(_min,x))
 
-<? else -- cl.useCpp ?>
+<? else -- cl.private.useCpp ?>
 
 #define CLCPU_ENABLED
 
@@ -53,7 +53,7 @@ using std::clamp;
 using std::min;
 using std::max;
 
-<? end -- cl.useCpp ?>
+<? end -- cl.private.useCpp ?>
 
 #include <stddef.h>
 
@@ -73,7 +73,7 @@ using std::max;
 // TODO half?
 //typedef __fp16 half;
 
-<? if cl.useCpp then ?>
+<? if cl.private.useCpp then ?>
 
 <? for _,base in ipairs(vectorTypes) do ?>
 union <?=base?>2 {
@@ -107,7 +107,7 @@ union <?=base?>8 {
 } __attribute__((aligned(<?=ffi.sizeof('cl_'..base)*8?>)));
 <? end ?>
 
-<? else -- cl.useCpp ?>
+<? else -- cl.private.useCpp ?>
 
 <? for _,base in ipairs(vectorTypes) do ?>
 typedef union {
@@ -140,7 +140,7 @@ typedef union {
 
 <? end ?>
 
-<? end -- cl.useCpp ?>
+<? end -- cl.private.useCpp ?>
 
 <?=externC?> uint get_work_dim();
 <?=externC?> size_t get_global_size(int n);
@@ -156,7 +156,7 @@ typedef union {
 <?=externC?> size_t get_group_id(int n);
 
 
-<? if cl.useCpp then ?>
+<? if cl.private.useCpp then ?>
 
 inline int4 operator+(int4 const & a, int4 const & b) {
 	return int4{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
@@ -171,7 +171,7 @@ inline int4 operator*(int4 const & a, int const b) {
 	return int4{a.x * b, a.y * b, a.z * b, a.w * b};
 }
 
-<? else -- cl.useCpp ?>
+<? else -- cl.private.useCpp ?>
 
 static int4 int4_add(int4 a, int4 b) {
 	return (int4){
@@ -182,7 +182,7 @@ static int4 int4_add(int4 a, int4 b) {
 	};
 }
 
-<? end -- cl.useCpp ?>
+<? end -- cl.private.useCpp ?>
 
 // TODO should include isfinite(x) ? NAN : ...
 #define sign(x)	((x) > 0 ? 1 : ((x) < 0 ? -1 : 0))

@@ -7,51 +7,6 @@ local template = require 'template'
 
 require 'ffi.req' 'c.stdlib'	-- rand()
 
--- the global namespace object
-local cl = {}
-
--- private stuff for clcpu alone
--- not sure where I should hide this ...
-local private = {}
-cl.private = private
-
--- whether to verify each pointer passed into a function was an object we created
-private.extraStrictVerification = true
-
---private.kernelCallMethod = 'Lua'				-- fps 3
---private.kernelCallMethod = 'C-singlethread'		-- fps 15
-private.kernelCallMethod = 'C-multithread'
-
-
-local ffi_all_types = table{
---[[ these are typedef'd to others
-	'uchar',
-	'schar',
-	'ushort',
-	'sshort',
-	'uint',
-	'sint',
-	'ulong',
-	'slong',
---]]
-	-- [1] = C name, [2] = ffi name
-	{'uint8_t', 'uint8'},
-	{'int8_t', 'sint8'},
-	{'uint16_t', 'uint16'},
-	{'int16_t', 'sint16'},
-	{'uint32_t', 'uint32'},
-	{'int32_t', 'sint32'},
-	{'uint64_t', 'uint64'},
-	{'int64_t', 'sint64'},
-	{'float', 'float'},
-	{'double', 'double'},
-	{'long double', 'longdouble'},
-
-	-- these don't need setters
-	{'void', 'void'},
-	{'void*', 'pointer'},
-}
-
 -- copied from ffi/OpenCL.lua
 ffi.cdef[[
 enum {
@@ -622,6 +577,25 @@ enum {
 };
 ]]
 
+
+-- the global namespace object
+local cl = {}
+
+-- private stuff for clcpu alone
+-- not sure where I should hide this ...
+local private = {}
+cl.private = private
+
+-- whether to verify each pointer passed into a function was an object we created
+private.extraStrictVerification = true
+
+--private.kernelCallMethod = 'Lua'				-- fps 3
+--private.kernelCallMethod = 'C-singlethread'		-- fps 15
+private.kernelCallMethod = 'C-multithread'
+
+-- hack for forcing cpp format which is found in cl-cpu/run.lua:
+private.useCpp = false
+
 -- id is usually a cl_* which is typedef'd to a struct _cl_* *, so it's essentially a void*
 -- cl_*_info name ... cl_*_info is always uint32, except cl_device_address_info, which is a cl_bitfield, which is a uint64
 -- size_t paramSize
@@ -801,9 +775,9 @@ end
 -- DEVICE
 
 
-local clDeviceMaxMemAllocSize = 5461822664
-local clDeviceMaxWorkItemDimension = 3
-local clDeviceMaxWorkGroupSize = 1
+private.deviceMaxMemAllocSize = 5461822664
+private.deviceMaxWorkItemDim = 3
+private.deviceMaxWorkGroupSize = 1
 
 local cl_device_id_verify = ffi.cast('int', ffi.C.rand())
 
@@ -846,21 +820,21 @@ cl.clGetDeviceInfo = makeGetter{
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS] = {
 		type = 'cl_uint',
-		value = clDeviceMaxWorkItemDimension,
+		value = private.deviceMaxWorkItemDim,
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE] = {
 		type = 'size_t',
-		value = clDeviceMaxWorkGroupSize,
+		value = private.deviceMaxWorkGroupSize,
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_SIZES] = {
 		type = 'size_t[]',
 		-- TODO just use get() but when the type ends in [], instead handle mult ret?
 		getArray = function(paramSize, resultPtr, sizePtr)
 			if sizePtr ~= nil then
-				sizePtr[0] = ffi.sizeof'size_t' * clDeviceMaxWorkItemDimension
+				sizePtr[0] = ffi.sizeof'size_t' * private.deviceMaxWorkItemDim
 			end
 			if resultPtr ~= nil then
-				if paramSize < ffi.sizeof'size_t' * clDeviceMaxWorkItemDimension then
+				if paramSize < ffi.sizeof'size_t' * private.deviceMaxWorkItemDim then
 					return ffi.C.CL_INVALID_VALUE
 				end
 				resultPtr[0] = 1024
@@ -871,7 +845,7 @@ cl.clGetDeviceInfo = makeGetter{
 	},
 	[ffi.C.CL_DEVICE_MAX_MEM_ALLOC_SIZE] = {
 		type = 'cl_ulong',
-		value = clDeviceMaxMemAllocSize,
+		value = private.deviceMaxMemAllocSize,
 	},
 	[ffi.C.CL_DEVICE_NAME] = 'CPU debug implementation',
 	[ffi.C.CL_DEVICE_VENDOR] = 'Christopher Moore',
@@ -1063,8 +1037,8 @@ end
 
 local allMems = table()
 local allPtrs = table()	-- because I don't trust luajit to not gc a ptr I ffi.new'd
-cl.clcpu_allMems = allMems
-cl.clcpu_allPtrs = allPtrs
+private.allMems = allMems
+private.allPtrs = allPtrs
 
 local cl_mem_verify = ffi.C.rand()
 
@@ -1207,7 +1181,7 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errcodeRet)
 	end
 
 	if size == 0
-	or size > clDeviceMaxMemAllocSize
+	or size > private.deviceMaxMemAllocSize
 	then
 		return returnError(ffi.C.CL_INVALID_BUFFER_SIZE)
 	end
@@ -1559,7 +1533,7 @@ end
 
 -- KERNEL helper
 
-local clKernelWorkGroupSize = 1
+private.kernelWorkGroupSize = 1
 
 local cl_kernel_verify = ffi.C.rand()
 
@@ -1784,8 +1758,6 @@ end
 
 -- PROGRAM
 
--- hack for forcing cpp format which is found in cl-cpu/run.lua:
-cl.useCpp = false
 cl.extraInclude = table()
 local buildEnv
 local clcpu_h
@@ -1797,11 +1769,8 @@ function cl:getBuildEnv()
 		assert(private.pathToCLCPU'clcpu-core.c':read()),
 		{
 			cl = cl,
-			ffi_all_types = ffi_all_types,
-			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 			clcpu_h = template(clcpu_h, {
 				cl = cl,
-				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 				extern = "",	-- declared here, so not extern
 			}),
 		}
@@ -1818,10 +1787,8 @@ function cl:getBuildEnv()
 			assert(private.pathToCLCPU'clcpu-core-multi.cpp':read()),
 			{
 				cl = cl,
-				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 				clcpu_h = template(clcpu_h, {
 					cl = cl,
-					clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 					extern = 'extern "C"',	-- c++, so needs extern "C"
 				}),
 			}
@@ -1832,7 +1799,7 @@ function cl:getBuildEnv()
 
 
 	ffi.cdef(template([[
-<? for _,f in ipairs(ffi_all_types) do ?>
+<? for _,f in ipairs(cl.private.ffi_all_types) do ?>
 void ffi_set_<?=f[2]?>(ffi_type ** const);
 <? end ?>
 
@@ -1843,19 +1810,19 @@ typedef unsigned long ulong;
 
 typedef struct {
 	uint work_dim;
-	size_t global_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_size[<?=clDeviceMaxWorkItemDimension?>];
-	size_t num_groups[<?=clDeviceMaxWorkItemDimension?>];
-	size_t global_work_offset[<?=clDeviceMaxWorkItemDimension?>];
+	size_t global_size[<?=cl.private.deviceMaxWorkItemDim?>];
+	size_t local_size[<?=cl.private.deviceMaxWorkItemDim?>];
+	size_t num_groups[<?=cl.private.deviceMaxWorkItemDim?>];
+	size_t global_work_offset[<?=cl.private.deviceMaxWorkItemDim?>];
 } clcpu_private_globalinfo_t;
 extern clcpu_private_globalinfo_t clcpu_private_globalinfo;
 
 typedef struct {
 	size_t global_linear_id;
 	size_t local_linear_id;
-	size_t global_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t local_id[<?=clDeviceMaxWorkItemDimension?>];
-	size_t group_id[<?=clDeviceMaxWorkItemDimension?>];
+	size_t global_id[<?=cl.private.deviceMaxWorkItemDim?>];
+	size_t local_id[<?=cl.private.deviceMaxWorkItemDim?>];
+	size_t group_id[<?=cl.private.deviceMaxWorkItemDim?>];
 } clcpu_private_threadinfo_t;
 extern clcpu_private_threadinfo_t clcpu_private_threadinfo[<?=cl.private.numcores?>];
 
@@ -1886,11 +1853,9 @@ void clcpu_private_execMultiThread(
 
 ]], {
 		cl = cl,
-		ffi_all_types = ffi_all_types,
-		clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 	}))
 
-	for _,f in ipairs(ffi_all_types) do
+	for _,f in ipairs(private.ffi_all_types) do
 		local k = tostring(ffi.typeof(f[1]))
 		ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
 	end
@@ -1898,7 +1863,7 @@ void clcpu_private_execMultiThread(
 	-- using ffi-c is convenient so long as the compile + link are done together ...
 	-- but if I want to separate them, I'll have so do this myself ...
 	-- [[
-	if self.useCpp then
+	if private.useCpp then
 		-- c++ fails on field initialization
 		buildEnv = require 'ffi-c.cpp'
 	else
@@ -1908,6 +1873,36 @@ void clcpu_private_execMultiThread(
 
 	return buildEnv
 end
+
+private.ffi_all_types = table{
+--[[ these are typedef'd to others
+	'uchar',
+	'schar',
+	'ushort',
+	'sshort',
+	'uint',
+	'sint',
+	'ulong',
+	'slong',
+--]]
+	-- [1] = C name, [2] = ffi name
+	{'uint8_t', 'uint8'},
+	{'int8_t', 'sint8'},
+	{'uint16_t', 'uint16'},
+	{'int16_t', 'sint16'},
+	{'uint32_t', 'uint32'},
+	{'int32_t', 'sint32'},
+	{'uint64_t', 'uint64'},
+	{'int64_t', 'sint64'},
+	{'float', 'float'},
+	{'double', 'double'},
+	{'long double', 'longdouble'},
+
+	-- these don't need setters
+	{'void', 'void'},
+	{'void*', 'pointer'},
+}
+
 
 --[[
 args:
@@ -1949,6 +1944,8 @@ typedef void ffi_type;
 			print('using '..private.numcores..' cores')
 		end
 	end
+
+
 
 	clcpu_h = assert(private.pathToCLCPU'cl-cpu.h':read())
 
@@ -2217,11 +2214,9 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 			cl = cl,
 			id = id,
 			vectorTypes = vectorTypes,
-			clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 
 			clcpu_h = template(clcpu_h, {
 				cl = cl,
-				clDeviceMaxWorkItemDimension = clDeviceMaxWorkItemDimension,
 				extern = ffi.os == 'Windows'
 					and '__declspec(dllexport) extern'
 					or 'extern',
@@ -2241,7 +2236,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 			code = code:gsub('%(real'..n..'%)', '('..realtype..n..')')
 		end
 
-		if cl.useCpp then	-- convert .cl to .cpp
+		if private.useCpp then	-- convert .cl to .cpp
 			for _,base in ipairs(vectorTypes) do
 				code = code:gsub('%('..base..n..'%)%(', base..n..'(')
 			end
@@ -2347,7 +2342,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		local buildCtx = {}
 		buildCtx.currentProgramID = program.id	-- used by buildEnv:link
 		buildCtx.include = cl.extraInclude
-		buildCtx.cppver = cl.useCpp and 'c++20' or nil
+		buildCtx.cppver = private.useCpp and 'c++20' or nil
 		-- this does ...
 		-- :setup - makes the make env obj & writes code
 		-- :compile - code -> .o file
@@ -2643,7 +2638,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 			-- used by buildEnv:link
 			currentProgramID = program.id,
 			include = cl.extraInclude,
-			cppver = cl.useCpp and 'c++20' or nil,
+			cppver = private.useCpp and 'c++20' or nil,
 		})
 		if buildCtx.error then error(buildCtx.error) end
 --print('done compiling program entry', id)
@@ -2832,15 +2827,15 @@ function cl.clGetKernelWorkGroupInfo(kernelID, device, name, paramSize, resultPt
 		idcast = kernelCastAndVerify,
 		[ffi.C.CL_KERNEL_WORK_GROUP_SIZE] = {
 			type = 'size_t',
-			value = clKernelWorkGroupSize,
+			value = private.kernelWorkGroupSize,
 		},
 	}, kernelID, name, paramSize, resultPtr, sizePtr, device)
 end
 
-local defaultGlobalWorkOffset = ffi.new('size_t[?]', clDeviceMaxWorkItemDimension)
-local defaultLocalWorkSize = ffi.new('size_t[?]', clDeviceMaxWorkItemDimension)
-local defaultGlobalWorkSize = ffi.new('size_t[?]', clDeviceMaxWorkItemDimension)
-for i=0,clDeviceMaxWorkItemDimension-1 do
+local defaultGlobalWorkOffset = ffi.new('size_t[?]', private.deviceMaxWorkItemDim)
+local defaultLocalWorkSize = ffi.new('size_t[?]', private.deviceMaxWorkItemDim)
+local defaultGlobalWorkSize = ffi.new('size_t[?]', private.deviceMaxWorkItemDim)
+for i=0,private.deviceMaxWorkItemDim-1 do
 	defaultGlobalWorkOffset[i] = 0
 	defaultLocalWorkSize[i] = 1
 	defaultGlobalWorkSize[i] = 1
@@ -2868,7 +2863,7 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 
 	workDim = ffi.cast('cl_uint', workDim)
 	workDim = tonumber(workDim)
-	if workDim < 1 or workDim > clDeviceMaxWorkItemDimension then return ffi.C.CL_INVALID_WORK_DIMENSION end
+	if workDim < 1 or workDim > private.deviceMaxWorkItemDim then return ffi.C.CL_INVALID_WORK_DIMENSION end
 
 	globalWorkOffset = ffi.cast('size_t*', globalWorkOffset)
 	if globalWorkOffset == nil then
@@ -2879,7 +2874,7 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 	if globalWorkSize == nil then
 		globalWorkSize = ffi.cast('size_t*', defaultGlobalWorkSize)
 	end
---	for i=0,clDeviceMaxWorkItemDimension-1 do
+--	for i=0,private.deviceMaxWorkItemDim-1 do
 --		if globalWorkSize[i] + globalWorkOffset[i] > max device work size then return ffi.C.CL_INVALID_GLOBAL_WORK_SIZE end
 --	end
 
@@ -2894,11 +2889,11 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 		totalLocalWorkSize = totalLocalWorkSize * localWorkSize[i]
 	end
 --print('totalLocalWorkSize', totalLocalWorkSize)
---print('clKernelWorkGroupSize', clKernelWorkGroupSize)
---print('clDeviceMaxWorkGroupSize', clDeviceMaxWorkGroupSize)
-	if totalLocalWorkSize > clKernelWorkGroupSize then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
+--print('kernelWorkGroupSize', private.kernelWorkGroupSize)
+--print('deviceMaxWorkGroupSize', private.deviceMaxWorkGroupSize)
+	if totalLocalWorkSize > private.kernelWorkGroupSize then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
 	-- TODO return CL_INVALID_WORK_GROUP_SIZE if the program was compiled with cl-uniform-work-group-size and the number of work-items specified by global_work_size is not evenly divisible by size of work-group given by local_work_size or by the required work-group size specified in the kernel source.
-	if totalLocalWorkSize > clDeviceMaxWorkGroupSize then return ffi.C.CL_INVALID_WORK_ITEM_SIZE end
+	if totalLocalWorkSize > private.deviceMaxWorkGroupSize then return ffi.C.CL_INVALID_WORK_ITEM_SIZE end
 if totalLocalWorkSize == 0 then
 	error'here'
 end
@@ -3060,7 +3055,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 			num_groups_v[i] = num_groups_v[i] + 1
 		end
 	end
-	for i=workDim+1,clDeviceMaxWorkItemDimension do
+	for i=workDim+1,private.deviceMaxWorkItemDim do
 		global_work_offset_v[i] = 0
 		global_work_size_v[i] = 1
 		local_work_size_v[i] = 1
@@ -3069,14 +3064,14 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 --print'assigning globals...'
 	local globalinfo = clcpuCoreLib.lib.clcpu_private_globalinfo
 	globalinfo.work_dim = workDim
-	for n=0,clDeviceMaxWorkItemDimension-1 do
+	for n=0,private.deviceMaxWorkItemDim-1 do
 		globalinfo.global_size[n] = global_work_size_v[n+1]
 		globalinfo.local_size[n] = local_work_size_v[n+1]
 		globalinfo.num_groups[n] = num_groups_v[n+1]
 		globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 	end
 --print'...globals assigning'
-	assert(clDeviceMaxWorkItemDimension == 3)	-- TODO generalize the dim of the loop?
+	assert(private.deviceMaxWorkItemDim == 3)	-- TODO generalize the dim of the loop?
 	if private.kernelCallMethod == 'Lua' then
 		local threadinfo = clcpuCoreLib.lib.clcpu_private_threadinfo
 
@@ -3089,7 +3084,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 					is[1]=i
 					is[2]=j
 					is[3]=k
-					for n=1,clDeviceMaxWorkItemDimension  do
+					for n=1,private.deviceMaxWorkItemDim  do
 						threadinfo[0].local_id[n-1] = is[n] % local_work_size_v[n]
 						threadinfo[0].group_id[n-1] = is[n] / local_work_size_v[n]
 						threadinfo[0].global_id[n-1] = is[n] + globalinfo.global_work_offset[n-1]
