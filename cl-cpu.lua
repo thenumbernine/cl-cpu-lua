@@ -1022,7 +1022,7 @@ function cl.clCreateContext(properties, numDevices, devices, notify, userData, e
 	for i=0,tonumber(numDevices)-1 do
 		local device, err = deviceCastAndVerify(devices[i])
 		if err then
-			return returnError(ffi.C.CL_SUCCESS)	-- ... success?
+			return returnError(err)
 		end
 		-- if the device isn't available then return CL_DEVICE_NOT_AVAILABLE
 	end
@@ -1759,43 +1759,42 @@ end
 -- PROGRAM
 
 function private:getBuildEnv()
-	if private.buildEnv then return private.buildEnv end
-
 	-- while we're here, do this once ... and with C only
-	clcpuCoreLib = require 'ffi-c.c':build(template(
-		assert(private.pathToCLCPU'clcpu-core.c':read()),
-		{
-			cl = cl,
-			clcpu_h = template(private.clcpu_h, {
-				cl = cl,
-				extern = "",	-- declared here, so not extern
-			}),
-		}
-	))
-
-	if private.kernelCallMethod == 'C-multithread' then
-		local CPP = require 'ffi-c.cpp'
-
-		function CPP:addExtraObjFiles(objfiles)
-			objfiles:insert((assert(clcpuCoreLib.libfile)))
-		end
-
-		clcpuCoreMultiLib = CPP:build(template(
-			assert(private.pathToCLCPU'clcpu-core-multi.cpp':read()),
+	-- TODO move to :initialize somehow without breaking everything
+	if not clcpuCoreLib then
+		clcpuCoreLib = require 'ffi-c.c':build(template(
+			assert(private.pathToCLCPU'clcpu-core.c':read()),
 			{
 				cl = cl,
 				clcpu_h = template(private.clcpu_h, {
 					cl = cl,
-					extern = 'extern "C"',	-- c++, so needs extern "C"
+					extern = "",	-- declared here, so not extern
 				}),
 			}
 		))
 
-		function CPP:addExtraObjFiles(objfiles) end
-	end
+		if private.kernelCallMethod == 'C-multithread' then
+			local CPP = require 'ffi-c.cpp'
 
+			function CPP:addExtraObjFiles(objfiles)
+				objfiles:insert((assert(clcpuCoreLib.libfile)))
+			end
 
-	ffi.cdef(template([[
+			clcpuCoreMultiLib = CPP:build(template(
+				assert(private.pathToCLCPU'clcpu-core-multi.cpp':read()),
+				{
+					cl = cl,
+					clcpu_h = template(private.clcpu_h, {
+						cl = cl,
+						extern = 'extern "C"',	-- c++, so needs extern "C"
+					}),
+				}
+			))
+
+			function CPP:addExtraObjFiles(objfiles) end
+		end
+
+		ffi.cdef(template([[
 <? for _,f in ipairs(cl.private.ffi_all_types) do ?>
 void ffi_set_<?=f[2]?>(ffi_type ** const);
 <? end ?>
@@ -1848,13 +1847,14 @@ void clcpu_private_execMultiThread(
 <? end ?>
 
 
-]], {
-		cl = cl,
-	}))
+]], 	{
+			cl = cl,
+		}))
 
-	for _,f in ipairs(private.ffi_all_types) do
-		local k = tostring(ffi.typeof(f[1]))
-		ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
+		for _,f in ipairs(private.ffi_all_types) do
+			local k = tostring(ffi.typeof(f[1]))
+			ffi_setter_for_ctype[k] = 'ffi_set_'..f[2]
+		end
 	end
 
 	-- using ffi-c is convenient so long as the compile + link are done together ...
