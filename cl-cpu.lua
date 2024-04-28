@@ -589,9 +589,10 @@ cl.private = private
 -- whether to verify each pointer passed into a function was an object we created
 private.extraStrictVerification = true
 
---private.kernelCallMethod = 'Lua'				-- fps 3
---private.kernelCallMethod = 'C-singlethread'		-- fps 15
-private.kernelCallMethod = 'C-multithread'
+--private.kernelCallMethod = 'Lua'					-- fps 10
+--private.kernelCallMethod = 'C-singlethread'		-- fps 37
+private.kernelCallMethod = 'C-multithread'		-- fps 62
+--private.kernelCallMethod = 'CL-compute'
 
 -- hack for forcing cpp format which is found in cl-cpu/run.lua:
 private.useCpp = false
@@ -602,7 +603,7 @@ private.useCpp = false
 -- void* resultPtr
 -- size_t* sizePtr
 local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	if args.idcast then
 		local err
 		id, err = args.idcast(id)	-- segfault for getting kernel names ...
@@ -621,7 +622,7 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 	paramSize = ffi.cast('size_t', paramSize)
 	resultPtr = ffi.cast('void*', resultPtr)
 	sizePtr = ffi.cast('size_t*', sizePtr)
---print(args.name, id, name)--, paramSize, resultPtr, sizePtr)
+--DEBUG: print(args.name, id, name)--, paramSize, resultPtr, sizePtr)
 
 	local var = args[name]
 	if not var then return ffi.C.CL_INVALID_VALUE end
@@ -642,7 +643,7 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 
 -- assert that our pointers are already the right type ... ?
 
---print('var.type', var.type)
+--DEBUG: print('var.type', var.type)
 	local casttype
 	local arraybasetype	-- only used when var.type ends with []
 	if var.type:sub(-2) == '[]' then
@@ -653,11 +654,11 @@ local function handleGetter(args, id, name, paramSize, resultPtr, sizePtr, ...)
 	-- assume it's a pointer to the value
 		casttype = var.type .. '*'
 	end
---print('casting to '..casttype)
+--DEBUG: print('casting to '..casttype)
 	resultPtr = ffi.cast(casttype, resultPtr)
 
---print('resultPtr', resultPtr)
---print('sizePtr', sizePtr)
+--DEBUG: print('resultPtr', resultPtr)
+--DEBUG: print('sizePtr', sizePtr)
 
 	-- TODO this should be used for array getters, not just string getters
 	-- TODO should this only be called when the type ends in a [] ?
@@ -824,7 +825,9 @@ cl.clGetDeviceInfo = makeGetter{
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_GROUP_SIZE] = {
 		type = 'size_t',
-		value = private.deviceMaxWorkGroupSize,
+		get = function(id)
+			return ffi.cast('size_t', private.deviceMaxWorkGroupSize)
+		end,
 	},
 	[ffi.C.CL_DEVICE_MAX_WORK_ITEM_SIZES] = {
 		type = 'size_t[]',
@@ -980,15 +983,15 @@ local function prepareArgsDevices(numDevices, devices)
 	numDevices = ffi.cast('cl_uint', numDevices)
 	numDevices = tonumber(numDevices)
 
---print("devices before cast", devices)
+--DEBUG: print("devices before cast", devices)
 	devices = ffi.cast('cl_device_id*', devices)
---print("devices after cast", devices)
+--DEBUG: print("devices after cast", devices)
 	if devices == nil and numDevices > 0 then
---print("devices was nil but numDevices > 0 was ", numDevices)
+--DEBUG: print("devices was nil but numDevices > 0 was ", numDevices)
 		return ffi.C.CL_INVALID_VALUE
 	end
 	if devices ~= nil and numDevices == 0 then
---print("devices wasn't nil", devices," but numDevices == 0")
+--DEBUG: print("devices wasn't nil", devices," but numDevices == 0")
 		return ffi.C.CL_INVALID_VALUE
 	end
 	-- make a local copy so program can hold onto it
@@ -996,7 +999,7 @@ local function prepareArgsDevices(numDevices, devices)
 	for i=0,numDevices-1 do
 		local device, err = deviceCastAndVerify(devices[i])
 		if err then
---print("device["..i.."] wasn't really a device")
+--DEBUG: print("device["..i.."] wasn't really a device")
 			return err
 		end
 		newDevices[i] = device
@@ -1026,6 +1029,16 @@ function cl.clCreateContext(properties, numDevices, devices, notify, userData, e
 		end
 		-- if the device isn't available then return CL_DEVICE_NOT_AVAILABLE
 	end
+
+	if private.kernelCallMethod == 'CL-compute' then
+		-- should I assume this is run only after GL is initialied?
+		local GLProgram = require 'gl.program'
+		local maxComputeWorkGroupInvocations = GLProgram:get'GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS'
+print('GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS = '..maxComputeWorkGroupInvocations)
+		private.kernelWorkGroupSize = maxComputeWorkGroupInvocations
+		private.deviceMaxWorkGroupSize = maxComputeWorkGroupInvocations
+	end
+
 	-- notify is a callback ...
 	-- userData is userdata for the notify()
 	return returnError(ffi.C.CL_SUCCESS, allContexts[1])
@@ -1156,7 +1169,7 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errcodeRet)
 	flags = ffi.cast('cl_mem_flags', flags)
 	size = ffi.cast('size_t', size)
 	hostPtr = ffi.cast('void*', hostPtr)
---print('clCreateBuffer', ctx, flags, size, hostPtr, errcodeRet)
+--DEBUG: print('clCreateBuffer', ctx, flags, size, hostPtr, errcodeRet)
 
 	errcodeRet = ffi.cast('cl_int*', errcodeRet)
 	local function returnError(err, ret)
@@ -1199,8 +1212,8 @@ function cl.clCreateBuffer(ctx, flags, size, hostPtr, errcodeRet)
 	local ptr = ffi.new('uint8_t[?]', size)
 	allPtrs:insert(ptr)
 
---print('ptr', ptr)
---print('size', size)
+--DEBUG: print('ptr', ptr)
+--DEBUG: print('size', size)
 	mem[0].verify = cl_mem_verify
 	mem[0].size = size
 	mem[0].flags = flags
@@ -1315,7 +1328,7 @@ cl.clGetCommandQueueInfo = makeGetter{
 local handleEvents
 
 function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	--cmds = ffi.cast('cl_command_queue', cmds)
 	--buffer = ffi.cast('cl_mem', buffer)
 	block = ffi.cast('cl_bool', block)
@@ -1325,7 +1338,7 @@ function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWait
 	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
---print('clEnqueueWriteBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+--DEBUG: print('clEnqueueWriteBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
 
 	local cmds, err = queueCastAndVerify(cmds)
 	if err then return err end
@@ -1356,7 +1369,7 @@ function cl.clEnqueueWriteBuffer(cmds, buffer, block, offset, size, ptr, numWait
 end
 
 function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	--cmds = ffi.cast('cl_command_queue', cmds)
 	--buffer = ffi.cast('cl_mem', buffer)
 	block = ffi.cast('cl_bool', block)
@@ -1366,7 +1379,7 @@ function cl.clEnqueueReadBuffer(cmds, buffer, block, offset, size, ptr, numWaitL
 	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
---print('clEnqueueReadBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
+--DEBUG: print('clEnqueueReadBuffer', cmds, buffer, block, offset, size, ptr, numWaitListEvents, waitListEvents, event)
 
 	local cmds, err = queueCastAndVerify(cmds)
 	if err then return err end
@@ -1398,7 +1411,7 @@ end
 
 local int0 = ffi.new('int[1]', 0)
 function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	--cmds = ffi.cast('cl_command_queue', cmds)
 	--buffer = ffi.cast('cl_mem', buffer)
 	pattern = ffi.cast('uint8_t*', pattern)	-- signature says void* but it will end up uint8_t eventually
@@ -1408,10 +1421,10 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 	numWaitListEvents = ffi.cast('cl_uint', numWaitListEvents)
 	waitListEvents = ffi.cast('cl_event*', waitListEvents)
 	event = ffi.cast('cl_event*', event)
---print('clEnqueueFillBuffer', cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
---print('buffer size', buffer[0].size)
---print('buffer ptr', buffer[0].ptr)
---print('ffi sizeof buffer ptr', ffi.sizeof(buffer[0].ptr))
+--DEBUG: print('clEnqueueFillBuffer', cmds, buffer, pattern, patternSize, offset, size, numWaitListEvents, waitListEvents, event)
+--DEBUG: print('buffer size', buffer[0].size)
+--DEBUG: print('buffer ptr', buffer[0].ptr)
+--DEBUG: print('ffi sizeof buffer ptr', ffi.sizeof(buffer[0].ptr))
 
 	local cmds, err = queueCastAndVerify(cmds)
 	if err then return err end
@@ -1457,17 +1470,17 @@ function cl.clEnqueueFillBuffer(cmds, buffer, pattern, patternSize, offset, size
 		end
 	end
 	if isZero then
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 		ffi.fill(buffer[0].ptr + offset, size)
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	else
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 		local i = ffi.cast('size_t', 0)
 		while i < size do
 			buffer[0].ptr[offset+i] = pattern[i%patternSize]
 			i = i + 1
 		end
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	end
 
 	return ffi.C.CL_SUCCESS
@@ -1598,7 +1611,7 @@ local function findProgramKernelsFromCode(program)
 
 	-- try to find all kernels in the code ...
 	for kernelName, sigargs in code:gmatch('kernel%s+void%s+([a-zA-Z_][a-zA-Z0-9_]*)%s*%(([^)]*)%)') do
---print("found kernel", kernelName, "with signature", sigargs)
+--DEBUG: print("found kernel", kernelName, "with signature", sigargs)
 
 		-- split by comma and parse each arg separately
 		-- let's hope there's no macros in there with commas in them
@@ -1685,12 +1698,12 @@ local function bindProgramKernels(program)
 	-- do this after link
 	for kernelName, kernel in pairs(program.kernels) do
 		-- only do this after library loading
-	--print("cdef'ing as sig:\n"..sig)
+--DEBUG: print("cdef'ing as sig:\n"..sig)
 		ffi.cdef(kernel.sig)
 
 		if not xpcall(function()
 			kernel.func = program.lib[kernelName]
-	--print('func', kernel.func)
+--DEBUG: print('func', kernel.func)
 		end, function(luaerr)
 			io.stderr:write('bindProgramKernels:\n')
 			print('error while compiling: '..tostring(luaerr))
@@ -2000,39 +2013,39 @@ local cl_program_verify = ffi.C.rand()
 local programsForID = table()
 
 local function programCastAndVerify(programHandle)
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	programHandle = ffi.cast('struct _cl_program*', programHandle)
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	if programHandle == nil then
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 		return nil, ffi.C.CL_INVALID_PROGRAM
 	end
---print(debug.traceback())
---print(programHandle)
---print(programHandle[0])
+--DEBUG: print(debug.traceback())
+--DEBUG: print(programHandle)
+--DEBUG: print(programHandle[0])
 	if programHandle[0].verify ~= cl_program_verify then
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 		return nil, ffi.C.CL_INVALID_PROGRAM
 	end
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	local program = programsForID[programHandle[0].id]
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	if not program then
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 		return nil, ffi.C.CL_INVALID_PROGRAM
 	end
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	if not program.handle then
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 		return nil, ffi.C.CL_INVALID_PROGRAM
 	end
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	if programHandle ~= ffi.cast('cl_program', program.handle) then
 		-- TODO or maybe an error for internal integrity check?
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 		return nil, ffi.C.CL_INVALID_PROGRAM
 	end
---print(debug.traceback())
+--DEBUG: print(debug.traceback())
 	return programHandle
 end
 
@@ -2210,7 +2223,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	local id = #programsForID+1
 	programHandle[0].verify = cl_program_verify
 	programHandle[0].id = id
---print('adding program entry', id)
+--DEBUG: print('adding program entry', id)
 
 	-- this will initialize clcpu_h
 	private:getBuildEnv()
@@ -2240,7 +2253,7 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	local realtype = code:match'typedef%s+(%S*)%s+real;'
 	for _,n in ipairs{2,4} do
 		if realtype then
---print('replacing realtype '..realtype)
+--DEBUG: print('replacing realtype '..realtype)
 			code = code:gsub('%(real'..n..'%)', '('..realtype..n..')')
 		end
 
@@ -2300,6 +2313,10 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 	-- in order to split the clBuildProgram up into compile + link, that means splitting up the ffi-c :build process into separate compile + link ...
 	-- I could do that ... or I could just pull the contents out of it (which relies on lua-make) , and just use that, and separate that into compile + link
 
+	if private.kernelCallMethod == 'CL-compute' then
+		error("TODO clCompileProgram CL-compute")
+	end
+
 	-- [[ BEGIN matches clBuildProgram
 
 	local err
@@ -2324,7 +2341,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 
 	local err = ffi.C.CL_SUCCESS
 	local id = programHandle[0].id
---print('compiling program entry', id)
+--DEBUG: print('compiling program entry', id)
 	local program = programsForID[id]
 
 	-- if there are kernels attached to the program...
@@ -2366,7 +2383,7 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 		if buildCtx.error then error(buildCtx.error) end
 		buildEnv:compile(args, buildCtx)
 		if buildCtx.error then error(buildCtx.error) end
---print('done compiling program entry', id)
+--DEBUG: print('done compiling program entry', id)
 
 		-- save for later for when clLinkProgram is called
 		program.buildArgs = args
@@ -2395,6 +2412,10 @@ end
 -- just obj -> exe
 --cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
 function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
+	if private.kernelCallMethod == 'CL-compute' then
+		error("TODO clLinkProgram CL-compute")
+	end
+
 	errcodeRet = ffi.cast('cl_int*', errcodeRet)
 	local function returnError(err, ret)
 		if errcodeRet ~= nil then errcodeRet[0] = err end
@@ -2411,7 +2432,7 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 	local err
 	err, numDevices, devices = prepareArgsDevices(numDevices, devices)
 	if err ~= ffi.C.CL_SUCCESS then
---print("prepareArgsDevices failed")
+--DEBUG: print("prepareArgsDevices failed")
 		return returnError(err)
 	end
 	-- TODO if device is still building a program then return CL_INVALID_OPERATION
@@ -2425,7 +2446,7 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 	-- TODO if any options are invalid then return CL_INVALID_BUILD_OPTIONS
 
 	if notify == nil and userData ~= nil then
---print("notify was nil but userData wasn't nil ... CL_INVALID_VALUE")
+--DEBUG: print("notify was nil but userData wasn't nil ... CL_INVALID_VALUE")
 		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 
@@ -2438,7 +2459,7 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 	if (inputProgramHandles == nil and numInputPrograms > 0)
 	or (inputProgramHandles ~= nil and numInputPrograms == 0)
 	then
---print("numInputPrograms vs inputProgramHandles disagreed ... CL_INVALID_VALUE")
+--DEBUG: print("numInputPrograms vs inputProgramHandles disagreed ... CL_INVALID_VALUE")
 		return returnError(ffi.C.CL_INVALID_VALUE)
 	end
 
@@ -2446,7 +2467,7 @@ function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, i
 	for i=0,numInputPrograms-1 do
 		local programHandle, err = programCastAndVerify(inputProgramHandles[i])
 		if err then
---print("programCastAndVerify on inputProgramHandles["..i.."] failed")
+--DEBUG: print("programCastAndVerify on inputProgramHandles["..i.."] failed")
 			return returnError(err)
 		end
 		local id = programHandle[0].id
@@ -2602,7 +2623,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 
 	local err = ffi.C.CL_SUCCESS
 	local id = programHandle[0].id
---print('compiling program entry', id)
+--DEBUG: print('compiling program entry', id)
 	local program = programsForID[id]
 
 	-- if there are kernels attached to the program already...
@@ -2617,6 +2638,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 
 	-- TODO CL_INVALID_OPERATION if program was not created with clCreateProgramWithSource, clCreateProgramWithIL or clCreateProgramWithBinary
 
+
 	-- clear results of a previous build?
 	program.lib = nil
 	program.libfile = nil
@@ -2627,6 +2649,48 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	program.devices = nil
 	program.status = ffi.C.CL_BUILD_IN_PROGRESS
 	program.options = nil
+
+
+	if private.kernelCallMethod == 'CL-compute' then
+		local GLProgram = require 'gl.program'
+		local glslVersion = GLProgram.getVersionPragma()
+		program.computeShader = GLProgram{
+			computeCode = template([[
+<?=glslVersion?>
+
+-- TODO require ARB_compute_variable_group_size
+-- and then layout(local_size_variable)
+-- and then set the local size upon kernel call instead of hardcoding
+
+-- TODO here enumerate all cl buffers in the kernel args and write ...
+-- TODO ... 1D vs 2D ... and read vs write vs readwrite?
+layout(rgba32f, binding=<?=i?>) uniform readwrite image2D <?=name?>;
+
+]], 			{
+
+-- wait ... is this local size the same as the CL local size?
+-- or is it something else?
+-- why does it have to be hard-coded upon compile time?
+-- https://www.khronos.org/opengl/wiki/Compute_Shader
+-- sounds like "work group count" x "local size" in opengl-compute = "global size" in CL
+-- ... and that would mean that, still, local size is hard-coded in GL-Compute
+-- 
+-- TODO require ARB_compute_variable_group_size
+-- and then layout(local_size_variable)
+-- and then set the local size upon kernel call instead of hardcoding
+-- 
+-- I guess I could hard-code the local size
+-- but then the API caller is supposed to provide their own
+-- I could always just ignore that one ... and hope it doesn't matter ... tho it eventually will ...
+
+					glslVersion = glslVersion,
+				}
+			)
+			..'\n'
+			..program.code,
+		}
+	end
+
 
 	local buildCtx
 	xpcall(function()
@@ -2662,7 +2726,7 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 			cppver = private.useCpp and 'c++20' or nil,
 		})
 		if buildCtx.error then error(buildCtx.error) end
---print('done compiling program entry', id)
+--DEBUG: print('done compiling program entry', id)
 
 		-- assign to locals first so if any errors occur in reading fields, program will still be clean
 		local libdata = assert(path(buildCtx.libfile):read(), "couldn't open file "..buildCtx.libfile)
@@ -2741,7 +2805,7 @@ cl.clGetKernelInfo = makeGetter{
 }
 
 function cl.clCreateKernel(programHandle, kernelName, errcodeRet)
---print('clCreateKernel', programHandle, kernelName, errcodeRet)
+--DEBUG: print('clCreateKernel', programHandle, kernelName, errcodeRet)
 	errcodeRet = ffi.cast('cl_int*', errcodeRet)
 	local function returnError(err, ret)
 		if errcodeRet ~= nil then errcodeRet[0] = err end
@@ -2807,7 +2871,7 @@ function cl.clSetKernelArg(kernelHandle, index, size, value)
 		end
 	end
 
---print('clSetKernelArg', kernelHandle, index, size, value)
+--DEBUG: print('clSetKernelArg', kernelHandle, index, size, value)
 
 	-- if the kernel arg is global then the value better be a cl_mem ...
 	if argInfo.isGlobal
@@ -2867,9 +2931,11 @@ for i=0,private.deviceMaxWorkItemDim-1 do
 	defaultGlobalWorkSize[i] = 1
 end
 
+
+
 function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
---print(debug.traceback())
---print('clEnqueueNDRangeKernel', cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
+--DEBUG: print(debug.traceback())
+--DEBUG: print('clEnqueueNDRangeKernel', cmds, kernelHandle, workDim, globalWorkOffset, globalWorkSize, localWorkSize, numWaitListEvents, waitListEvents, event)
 
 	--cmds = ffi.cast('cl_command_queue', cmds)
 	local cmds, err = queueCastAndVerify(cmds)
@@ -2881,10 +2947,10 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 
 	local kernel = kernelsForID[kernelHandle[0].id]
 	if not kernel then return ffi.C.CL_INVALID_KERNEL end
---print('kernel', kernel.name)
+--DEBUG: print('kernel', kernel.name)
 
---print('kernel.ctx', kernel.ctx)
---print('cmds[0].ctx', cmds[0].ctx)
+--DEBUG: print('kernel.ctx', kernel.ctx)
+--DEBUG: print('cmds[0].ctx', cmds[0].ctx)
 	if kernel.ctx ~= cmds[0].ctx then return ffi.C.CL_INVALID_CONTEXT end
 
 	workDim = ffi.cast('cl_uint', workDim)
@@ -2914,9 +2980,9 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 	for i=0,workDim-1 do
 		totalLocalWorkSize = totalLocalWorkSize * localWorkSize[i]
 	end
---print('totalLocalWorkSize', totalLocalWorkSize)
---print('kernelWorkGroupSize', private.kernelWorkGroupSize)
---print('deviceMaxWorkGroupSize', private.deviceMaxWorkGroupSize)
+--DEBUG: print('totalLocalWorkSize', totalLocalWorkSize)
+--DEBUG: print('kernelWorkGroupSize', private.kernelWorkGroupSize)
+--DEBUG: print('deviceMaxWorkGroupSize', private.deviceMaxWorkGroupSize)
 	if totalLocalWorkSize > private.kernelWorkGroupSize then return ffi.C.CL_INVALID_WORK_GROUP_SIZE end
 	-- TODO return CL_INVALID_WORK_GROUP_SIZE if the program was compiled with cl-uniform-work-group-size and the number of work-items specified by global_work_size is not evenly divisible by size of work-group given by local_work_size or by the required work-group size specified in the kernel source.
 	if totalLocalWorkSize > private.deviceMaxWorkGroupSize then return ffi.C.CL_INVALID_WORK_ITEM_SIZE end
@@ -2939,8 +3005,8 @@ end
 
 	local program = kernel.program
 	if not program then return ffi.C.CL_INVALID_PROGRAM_EXECUTABLE end
---print('program', program.libfile)
---print('program id', program.id)
+--DEBUG: print('program', program.libfile)
+--DEBUG: print('program id', program.id)
 
 	local pid = program.id
 	local lib = program.lib
@@ -2959,16 +3025,16 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 			local argInfo = assert(argInfos[i])
 			local srcarg = srcargs[i]
 			if srcarg == nil then		-- arg was not specified
---print("Lua call branch: arg was not specified ...")
+--DEBUG: print("Lua call branch: arg was not specified ...")
 				return ffi.C.CL_INVALID_KERNEL_ARGS
 			end
 			local arg = srcarg.ptr
 			local size = srcarg.size
-	--print('arg '..i)
-	--print('type(arg)', type(arg))
-	--print('ffi.typeof(arg)', ffi.typeof(arg))
-	--print('argInfo.origtype', argInfo.origtype)
-	--print('argInfo.type', argInfo.type)
+--DEBUG: print('arg '..i)
+--DEBUG: print('type(arg)', type(arg))
+--DEBUG: print('ffi.typeof(arg)', ffi.typeof(arg))
+--DEBUG: print('argInfo.origtype', argInfo.origtype)
+--DEBUG: print('argInfo.type', argInfo.type)
 			assert(type(arg) == 'cdata')
 			--assert(tostring(ffi.typeof(arg)) == 'ctype<void *>')	-- if i'm keeping track of the client's ptr
 			assert(tostring(ffi.typeof(arg)) == 'ctype<unsigned char [?]>')	-- if i'm saving it in my own buffer
@@ -2976,8 +3042,8 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 			if argInfo.isGlobal
 			or argInfo.isConstant
 			then	-- assert we have a cl_mem ... same with local?
-	--print'isGlobal or isConstant'
-	--print('before cast', arg)
+--DEBUG: print'isGlobal or isConstant'
+--DEBUG: print('before cast', arg)
 				arg = ffi.cast('cl_mem*', arg)
 				if arg == nil then
 					error'here'
@@ -2987,13 +3053,13 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 					error'here'
 					return err
 				end
-	--print('after cast, arg', arg)
-	--print('after cast, arg[0]', arg[0])
-	--print('after cast, arg[0][0]', arg[0][0])
-	--print('after cast, arg[0][0].verify', arg[0][0].verify)
-				arg = arg[0][0].ptr
-			elseif argInfo.isLocal then
-	--print'isLocal'
+--DEBUG: print('after cast, arg', arg)
+--DEBUG: print('after cast, arg[0]', arg[0])
+--DEBUG: print('after cast, arg[0][0]', arg[0][0])
+--DEBUG: print('after cast, arg[0][0].verify', arg[0][0].verify)
+			arg = arg[0][0].ptr
+		elseif argInfo.isLocal then
+--DEBUG: print'isLocal'
 				-- use the pointer as-is
 				local localptr = srcarg.localptr
 				if not localptr then
@@ -3002,10 +3068,10 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 				end
 				arg = localptr
 			else
-	--print'neither local nor global (prim?)'
+--DEBUG: print'neither local nor global (prim?)'
 				arg = ffi.cast(argInfo.type..'*', arg)[0]
 			end
-	--print('arg value', arg)
+--DEBUG: print('arg value', arg)
 			dstargs[i] = arg
 		end
 	elseif private.kernelCallMethod == 'C-singlethread'
@@ -3021,10 +3087,10 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 
 		for i=1,kernel.numargs do
 			local argInfo = assert(argInfos[i])
-			--print('ARGINFOTYPE', argInfo.type, argInfo.isGlobal, argInfo.isConstant, argInfo.isLocal)
+--DEBUG: print('ARGINFOTYPE', argInfo.type, argInfo.isGlobal, argInfo.isConstant, argInfo.isLocal)
 			local srcarg = srcargs[i]
 			if srcarg == nil then		-- arg was not specified
---print("C call branch: arg was not specified ...")
+--DEBUG: print("C call branch: arg was not specified ...")
 				return ffi.C.CL_INVALID_KERNEL_ARGS
 			end
 			local arg = srcarg.ptr
@@ -3067,7 +3133,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 	end
 
 
---print('calling...')
+--DEBUG: print('calling...')
 	local global_work_offset_v = {}
 	local global_work_size_v = {}
 	local local_work_size_v = {}
@@ -3087,7 +3153,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		local_work_size_v[i] = 1
 		num_groups_v[i] = 1
 	end
---print'assigning globals...'
+--DEBUG: print'assigning globals...'
 	local globalinfo = clcpuCoreLib.lib.clcpu_private_globalinfo
 	globalinfo.work_dim = workDim
 	for n=0,private.deviceMaxWorkItemDim-1 do
@@ -3096,7 +3162,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		globalinfo.num_groups[n] = num_groups_v[n+1]
 		globalinfo.global_work_offset[n] = global_work_offset_v[n+1]
 	end
---print'...globals assigning'
+--DEBUG: print'...globals assigning'
 	assert(private.deviceMaxWorkItemDim == 3)	-- TODO generalize the dim of the loop?
 	if private.kernelCallMethod == 'Lua' then
 		local threadinfo = clcpuCoreLib.lib.clcpu_private_threadinfo
@@ -3106,7 +3172,7 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		for i=0,global_work_size_v[1]-1 do
 			for j=0,global_work_size_v[2]-1 do
 				for k=0,global_work_size_v[3]-1 do
---print(i,j,k)
+--DEBUG: print(i,j,k)
 					is[1]=i
 					is[2]=j
 					is[3]=k
@@ -3143,10 +3209,12 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		-- ... I guess those need to be per-thread variables, so probably need to be replaced with a macro somehow and then stored in arguments of the C function?
 		clcpuCoreMultiLib.lib.clcpu_private_execMultiThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 		--clcpuCoreLib.lib.clcpu_private_execSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
+	elseif private.kernelCallMethod == 'CL-compute' then
+		error'TODO clEnqueueNDRangeKernel CL-compute'
 	else
 		error("unknown kernelCallMethod "..tostring(private.kernelCallMethod))
 	end
---print('clEnqueueNDRangeKernel done')
+--DEBUG: print('clEnqueueNDRangeKernel done')
 	return ffi.C.CL_SUCCESS
 end
 
