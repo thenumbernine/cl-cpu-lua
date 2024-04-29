@@ -592,7 +592,7 @@ private.extraStrictVerification = true
 --private.kernelCallMethod = 'Lua'					-- fps 10
 --private.kernelCallMethod = 'C-singlethread'		-- fps 37
 private.kernelCallMethod = 'C-multithread'		-- fps 62
---private.kernelCallMethod = 'CL-compute'
+--private.kernelCallMethod = 'GL-compute'
 
 -- hack for forcing cpp format which is found in cl-cpu/run.lua:
 private.useCpp = false
@@ -1030,7 +1030,10 @@ function cl.clCreateContext(properties, numDevices, devices, notify, userData, e
 		-- if the device isn't available then return CL_DEVICE_NOT_AVAILABLE
 	end
 
-	if private.kernelCallMethod == 'CL-compute' then
+--[[ don't do this, because GL-compute hardcodes the local size.  instead for now keep the local size at 1.
+-- there is an extension for providing the local_size at the time of call, but AMD doesn't seem to like it...
+-- AMD also doesn't seem to like OpenCL, so big surprise...
+	if private.kernelCallMethod == 'GL-compute' then
 		-- should I assume this is run only after GL is initialied?
 		local GLProgram = require 'gl.program'
 		local maxComputeWorkGroupInvocations = GLProgram:get'GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS'
@@ -1038,6 +1041,7 @@ print('GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS = '..maxComputeWorkGroupInvocations
 		private.kernelWorkGroupSize = maxComputeWorkGroupInvocations
 		private.deviceMaxWorkGroupSize = maxComputeWorkGroupInvocations
 	end
+--]]
 
 	-- notify is a callback ...
 	-- userData is userdata for the notify()
@@ -2229,21 +2233,24 @@ function cl.clCreateProgramWithSource(ctx, numStrings, stringsPtr, lengthsPtr, e
 	private:getBuildEnv()
 
 	local vectorTypes = {'char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double'}
-	local srcpath = private.pathToCLCPU'clcpu-header-glue.c'
-	local code = table{
-		template(assert(srcpath:read()), {
-			cl = cl,
-			id = id,
-			vectorTypes = vectorTypes,
-
-			clcpu_h = template(private.clcpu_h, {
+	local code = table()
+	if private.kernelCallMethod ~= 'GL-compute' then
+		local srcpath = private.pathToCLCPU'clcpu-header-glue.c'
+		code:insert(
+			template(assert(srcpath:read()), {
 				cl = cl,
-				extern = ffi.os == 'Windows'
-					and '__declspec(dllexport) extern'
-					or 'extern',
-			}),
-		}),
-	}
+				id = id,
+				vectorTypes = vectorTypes,
+
+				clcpu_h = template(private.clcpu_h, {
+					cl = cl,
+					extern = ffi.os == 'Windows'
+						and '__declspec(dllexport) extern'
+						or 'extern',
+				}),
+			})
+		)
+	end
 	for i=0,tonumber(numStrings)-1 do
 		code:insert(ffi.string(stringsPtr[i], lengthsPtr[i]))
 	end
@@ -2313,8 +2320,8 @@ function cl.clCompileProgram(programHandle, numDevices, devices, options, numInp
 	-- in order to split the clBuildProgram up into compile + link, that means splitting up the ffi-c :build process into separate compile + link ...
 	-- I could do that ... or I could just pull the contents out of it (which relies on lua-make) , and just use that, and separate that into compile + link
 
-	if private.kernelCallMethod == 'CL-compute' then
-		error("TODO clCompileProgram CL-compute")
+	if private.kernelCallMethod == 'GL-compute' then
+		error("TODO clCompileProgram GL-compute")
 	end
 
 	-- [[ BEGIN matches clBuildProgram
@@ -2412,8 +2419,8 @@ end
 -- just obj -> exe
 --cl_program clLinkProgram(cl_context context, cl_uint num_devices, const cl_device_id * device_list, const char * options, cl_uint num_input_programs, const cl_program * input_programs, void ( * pfn_notify)(cl_program program, void * user_data), void * user_data, cl_int * errcode_ret);
 function cl.clLinkProgram(ctx, numDevices, devices, options, numInputPrograms, inputProgramHandles, notify, userData, errcodeRet)
-	if private.kernelCallMethod == 'CL-compute' then
-		error("TODO clLinkProgram CL-compute")
+	if private.kernelCallMethod == 'GL-compute' then
+		error("TODO clLinkProgram GL-compute")
 	end
 
 	errcodeRet = ffi.cast('cl_int*', errcodeRet)
@@ -2651,22 +2658,48 @@ function cl.clBuildProgram(programHandle, numDevices, devices, options, notify, 
 	program.options = nil
 
 
-	if private.kernelCallMethod == 'CL-compute' then
+	if private.kernelCallMethod == 'GL-compute' then
 		local GLProgram = require 'gl.program'
 		local glslVersion = GLProgram.getVersionPragma()
-		program.computeShader = GLProgram{
-			computeCode = template([[
-<?=glslVersion?>
 
--- TODO require ARB_compute_variable_group_size
--- and then layout(local_size_variable)
--- and then set the local size upon kernel call instead of hardcoding
+		-- runs as long as program.code is defined
+		-- save our kernel info here
+		findProgramKernelsFromCode(program)
 
--- TODO here enumerate all cl buffers in the kernel args and write ...
--- TODO ... 1D vs 2D ... and read vs write vs readwrite?
-layout(rgba32f, binding=<?=i?>) uniform readwrite image2D <?=name?>;
+		-- now, per-kernel, we need to make a compute shader
+		for kernelName, kernel in pairs(program.kernels) do
 
-]], 			{
+			kernel.computeShader = GLProgram{
+				computeCode = template(
+glslVersion
+..[[
+
+// until I figure out a better way, I'll just set the local size to 1
+layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+
+// TODO here enumerate all cl buffers in the kernel args and write ...
+// TODO ... 1D vs 2D ... and read vs write vs readwrite?
+// so all this needs to be per-kernel
+<?
+local imageArgIndex = 0
+for _,argInfo in ipairs(kernel.argInfos) do
+	if argInfo.isGlobal or argInfo.isConstant then
+		argInfo.imageArgIndex = imageArgIndex
+?>
+layout(binding=<?=imageArgIndex?>) uniform <?
+if argInfo.type == 'void *' then
+	?>image1D<?
+else
+	?><?=argInfo.type?><?
+end
+?> <?=argInfo.name?>;
+<?
+		imageArgIndex = imageArgIndex + 1
+	end
+end
+?>
+
+]], 				{
 
 -- wait ... is this local size the same as the CL local size?
 -- or is it something else?
@@ -2674,21 +2707,38 @@ layout(rgba32f, binding=<?=i?>) uniform readwrite image2D <?=name?>;
 -- https://www.khronos.org/opengl/wiki/Compute_Shader
 -- sounds like "work group count" x "local size" in opengl-compute = "global size" in CL
 -- ... and that would mean that, still, local size is hard-coded in GL-Compute
--- 
+--
 -- TODO require ARB_compute_variable_group_size
 -- and then layout(local_size_variable)
 -- and then set the local size upon kernel call instead of hardcoding
--- 
+--
+-- TODO specifying the local size upon call (like OpenCL does) in GL-compute require ARB_compute_variable_group_size
+-- and then layout(local_size_variable)
+-- and then set the local size upon kernel call instead of hardcoding
+--
 -- I guess I could hard-code the local size
 -- but then the API caller is supposed to provide their own
 -- I could always just ignore that one ... and hope it doesn't matter ... tho it eventually will ...
+						kernel = kernel,
+					}
+				)
+				..'\n'
+-- can you link GL-compute link? until then, just re-add everything ...
+				..program.code
+				..template(
+[[
+void main() {
+	<?=kernel.name?>();	//TODO args correctly ... or as uniforms ... ?
+}
 
-					glslVersion = glslVersion,
-				}
-			)
-			..'\n'
-			..program.code,
-		}
+]],					{
+						kernel = kernel,
+					}
+				)
+			}
+		end
+
+		return	-- don't do C compiling
 	end
 
 
@@ -3209,8 +3259,8 @@ print("tried to enqueue a kernel of program "..tostring(program.buildCtx.srcfile
 		-- ... I guess those need to be per-thread variables, so probably need to be replaced with a macro somehow and then stored in arguments of the C function?
 		clcpuCoreMultiLib.lib.clcpu_private_execMultiThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
 		--clcpuCoreLib.lib.clcpu_private_execSingleThread(kernel.ffi_cif, kernel.func_closure, kernel.ffi_values)
-	elseif private.kernelCallMethod == 'CL-compute' then
-		error'TODO clEnqueueNDRangeKernel CL-compute'
+	elseif private.kernelCallMethod == 'GL-compute' then
+		error'TODO clEnqueueNDRangeKernel GL-compute'
 	else
 		error("unknown kernelCallMethod "..tostring(private.kernelCallMethod))
 	end
