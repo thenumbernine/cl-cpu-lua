@@ -3406,14 +3406,11 @@ cl.clGetEventProfilingInfo = makeGetter{
 
 --[[ cleanup buildEnv libtmp on exit?
 -- TODO shouldn't the ffi-c do this?
-local GCWrapper = require 'ffi.gcwrapper.gcwrapper'
-cl.cleanup = class(GCWrapper{
-	gctype = 'cl_cpu_shutdown_t',
-	ctype = 'int',
-	release = function(ptr)
-		os.execute('rm /tmp/libtmp*')
-	end,
-})()
+-- on cleanup ...
+require 'ext.gc'
+cl.__gc = function()
+	os.execute('rm /tmp/libtmp*')
+end
 --]]
 
 setmetatable(cl, {__index=ffi.C})
