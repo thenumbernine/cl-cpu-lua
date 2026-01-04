@@ -3,7 +3,7 @@
 local execfn = arg[0]
 
 require 'cl-cpu.setup'
-local clcpu = require 'cl.ffi.OpenCL'
+local clcpu = require 'cl'
 
 local args = {}
 args.pathToCLCPU = require 'ext.path'(execfn):getdir():abs()
