@@ -26,6 +26,8 @@ local function handleArgs(...)
 		return handleArgs(select(3, ...))
 	end
 
+	arg = {select(2, ...)}
+
 	-- else run ...
 	clcpu.private:initialize(args)
 	loadfile(x)(select(2, ...))

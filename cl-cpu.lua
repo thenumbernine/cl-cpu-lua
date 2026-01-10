@@ -1964,9 +1964,8 @@ typedef void ffi_type;
 		private.numcores = args.numcores
 	else
 		if private.kernelCallMethod == 'C-multithread' then
-			-- TODO get numcores from hardware_concurrency
-			require 'ffi.req' 'c.sys.sysinfo'
-			private.numcores = tonumber(ffi.C.get_nprocs())
+			require 'ffi.req' 'c.unistd'	-- sysconf
+			private.numcores = tonumber(ffi.C.sysconf(ffi.C._SC_NPROCESSORS_ONLN))
 			print('using '..private.numcores..' cores')
 		end
 	end
