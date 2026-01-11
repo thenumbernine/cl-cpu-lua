@@ -1708,7 +1708,7 @@ local function findProgramKernelsFromCode(program)
 
 	-- try to find all kernels in the code ...
 	for kernelName, sigargs in code:gmatch('kernel%s+void%s+([a-zA-Z_][a-zA-Z0-9_]*)%s*%(([^)]*)%)') do
---DEBUG: print("found kernel", kernelName, "with signature", sigargs)
+--DEBUG:print("kernel", kernelName, "found sig", string.trim(sigargs:gsub('%s+', ' ')))
 
 		-- split by comma and parse each arg separately
 		-- let's hope there's no macros in there with commas in them
@@ -1795,12 +1795,12 @@ local function bindProgramKernels(program)
 	-- do this after link
 	for kernelName, kernel in pairs(program.kernels) do
 		-- only do this after library loading
---DEBUG:print("cdef'ing as sig:\n"..kernel.sig)
+--DEBUG:print("kernel", kernelName, 'cdef sig:', kernel.sig)
 		ffi.cdef(kernel.sig)
 
 		if not xpcall(function()
 			kernel.func = program.lib[kernelName]
---DEBUG:print('func', kernel.func)
+--DEBUG:print('kernel', kernelName, 'func:', kernel.func)
 		end, function(luaerr)
 			io.stderr:write('bindProgramKernels:\n')
 			print('error while compiling: '..tostring(luaerr))
@@ -1956,7 +1956,6 @@ void clcpu_private_execMultiThread(
 );
 
 <? end ?>
-
 
 ]], 	{
 			cl = cl,
@@ -3082,6 +3081,7 @@ function cl.clEnqueueNDRangeKernel(cmds, kernelHandle, workDim, globalWorkOffset
 	local kernel = kernelsForID[kernelHandle[0].id]
 	if not kernel then return ffi.C.CL_INVALID_KERNEL end
 --DEBUG:print('kernel', kernel.name)
+--DEBUG:print('clEnqueueNDRangeKernel', kernel.name)
 
 --DEBUG:print('kernel.ctx', kernel.ctx)
 --DEBUG:print('cmds[0].ctx', cmds[0].ctx)
