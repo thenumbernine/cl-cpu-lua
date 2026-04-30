@@ -6,9 +6,6 @@ local io = require 'ext.io'
 local assert = require 'ext.assert'
 local template = require 'template'
 
--- this is for ffi-c
-WHY_CANT_I_JUST_ADD_EXTRA_LIBRARIES = {'ffi'}
-
 require 'ffi.req' 'c.stdlib'	-- rand()
 
 -- copied from ffi/OpenCL.lua
@@ -677,6 +674,9 @@ local ffi_cif_1
 if private.kernelCallMethod == 'C-singlethread'
 or private.kernelCallMethod == 'C-multithread'
 then
+	-- this is for ffi-c
+	WHY_CANT_I_JUST_ADD_EXTRA_LIBRARIES = {'/usr/lib/x86_64-linux-gnu/libffi.so'}
+
 	require 'ffi.req' 'libffi'	-- this is lib-ffi, not luajit-ffi
 	ffi_type_ptr_1 = ffi.typeof'ffi_type*[1]'
 	ffi_type_ptr_array = ffi.typeof'ffi_type*[?]'
