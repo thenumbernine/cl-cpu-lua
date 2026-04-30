@@ -6,6 +6,9 @@ local io = require 'ext.io'
 local assert = require 'ext.assert'
 local template = require 'template'
 
+-- this is for ffi-c
+WHY_CANT_I_JUST_ADD_EXTRA_LIBRARIES = {'ffi'}
+
 require 'ffi.req' 'c.stdlib'	-- rand()
 
 -- copied from ffi/OpenCL.lua
