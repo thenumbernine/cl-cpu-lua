@@ -1751,7 +1751,7 @@ local function findProgramKernelsFromCode(program)
 			-- or not? idk that i need it -- I'll let the kernel code do the casting
 
 			-- remove consts
-			tokens = tokens:filter(function(t) return t ~= 'const' end)
+			tokens = tokens:filteri(function(t) return t ~= 'const' end)
 
 			-- ok now when deducing the link signature, there will be lots of struct ptrs - just convert them to void*
 			-- so if the 2nd-to-last is a * then replace all type tokens with 'void*'
